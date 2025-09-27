@@ -102,8 +102,11 @@ module IDU(
     always @(posedge clk) begin
         if (~resetn)
             id_valid <= 1'b0;
-        else
-            id_valid <= if_to_id_valid & ~br_taken & id_allowin;
+        else if (br_taken)
+            id_valid <= 1'b0;
+        else if (id_allowin)
+            id_valid <= if_to_id_valid;
+        // else: keep current id_valid (maintain instruction during stall)
     end
 
     // Pipeline register updates
@@ -202,8 +205,8 @@ module IDU(
 
     assign res_from_mem = inst_ld_w;
     assign dst_is_r1 = inst_bl;
-    assign gr_we = ~(inst_st_w | inst_beq | inst_bne | inst_b);
-    assign mem_we = inst_st_w;
+    assign gr_we = ~(inst_st_w | inst_beq | inst_bne | inst_b) & id_valid;
+    assign mem_we = inst_st_w & id_valid;
     assign dest = dst_is_r1 ? 5'd1 : rd;
 
     // ALU source selection

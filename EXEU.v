@@ -21,7 +21,7 @@ module EXEU(
     output wire [31:0] data_sram_wdata,
 
     // Data forwarding to ID stage
-    output wire [38:0] exe_rf_zip,      // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
+    output wire [38:0] exe_rf_zip      // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
 );
 
     // Pipeline control
@@ -36,7 +36,7 @@ module EXEU(
     reg         exe_mem_we;
     reg  [31:0] exe_rkd_value;
     reg         exe_rf_we;
-    reg  [ 4:0] exe_rf_addr;
+    reg  [ 4:0] exe_rf_waddr;
 
     wire [31:0] exe_alu_result;
 
