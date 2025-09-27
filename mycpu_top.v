@@ -1,3 +1,4 @@
+`include "macros.h"
 module mycpu_top(
     input  wire        clk,
     input  wire        resetn,
@@ -30,31 +31,20 @@ module mycpu_top(
     wire        exe_to_mem_valid;
     wire        mem_to_wb_valid;
 
-    wire [31:0] if_pc;
-    wire [31:0] id_pc;
-    wire [31:0] exe_pc;
-    wire [31:0] mem_pc;
+    // Pipline interface
+    wire [`IF2ID_LEN   - 1:0]   if_to_id_zip;
+    wire [`ID2EXE_LEN  - 1:0]   id_to_exe_zip;
+    wire [`EXE2MEM_LEN - 1:0]   exe_to_mem_zip;
+    wire [`MEM2WB_LEN  - 1:0]   mem_to_wb_zip;
 
-    wire [5 :0] id_rf_zip;
-    wire [5 :0] exe_rf_zip;
-    wire [37:0] mem_rf_zip;
+    // Data forwarding
     wire [37:0] wb_rf_zip;
+    wire [37:0] mem_rf_zip;
+    wire [38:0] exe_rf_zip;
 
-    wire        id_res_from_mem;
-    wire        exe_res_from_mem;
-
-    wire        id_mem_we;
-    wire        exe_mem_we;
-    
-    wire [31:0] id_rkd_value;
-    wire [31:0] exe_rkd_value;
-
-
+    // Brach resolving
     wire        br_taken;
     wire [31:0] br_target;
-    wire [31:0] if_inst;
-    wire [75:0] id_alu_data_zip;
-    wire [31:0] exe_alu_result;
 
     IFU my_ifu(
         .clk(clk),
@@ -67,11 +57,10 @@ module mycpu_top(
         .inst_sram_rdata(inst_sram_rdata),
         
         .id_allowin(id_allowin),
+        .if_to_id_valid(if_to_id_valid),
         .br_taken(br_taken),
         .br_target(br_target),
-        .if_to_id_valid(if_to_id_valid),
-        .if_inst(if_inst),
-        .if_pc(if_pc)
+        .if_to_id_zip(if_to_id_zip)
     );
 
     IDU my_idu(
@@ -82,19 +71,15 @@ module mycpu_top(
         .br_taken(br_taken),
         .br_target(br_target),
         .if_to_id_valid(if_to_id_valid),
-        .if_inst(if_inst),
-        .if_pc(if_pc),
+        .if_to_id_zip(if_to_id_zip),
 
         .exe_allowin(exe_allowin),
-        .id_rf_zip(id_rf_zip),
         .id_to_exe_valid(id_to_exe_valid),
-        .id_pc(id_pc),
-        .id_alu_data_zip(id_alu_data_zip),
-        .id_res_from_mem(id_res_from_mem),
-        .id_mem_we(id_mem_we),
-        .id_rkd_value(id_rkd_value),
+        .id_to_exe_zip(id_to_exe_zip),
 
-        .wb_rf_zip(wb_rf_zip)
+        .wb_rf_zip(wb_rf_zip),
+        .mem_rf_zip(mem_rf_zip),
+        .exe_rf_zip(exe_rf_zip)
     );
 
     EXEU my_exeu(
@@ -102,22 +87,19 @@ module mycpu_top(
         .resetn(resetn),
         
         .exe_allowin(exe_allowin),
-        .id_rf_zip(id_rf_zip),
         .id_to_exe_valid(id_to_exe_valid),
-        .id_pc(id_pc),
-        .id_alu_data_zip(id_alu_data_zip),
-        .id_res_from_mem(id_res_from_mem),
-        .id_mem_we(id_mem_we),
-        .id_rkd_value(id_rkd_value),
+        .id_to_exe_zip(id_to_exe_zip),
 
         .mem_allowin(mem_allowin),
-        .exe_rf_zip(exe_rf_zip),
         .exe_to_mem_valid(exe_to_mem_valid),
-        .exe_pc(exe_pc),
-        .exe_alu_result(exe_alu_result),
-        .exe_res_from_mem(exe_res_from_mem),
-        .exe_mem_we(exe_mem_we),
-        .exe_rkd_value(exe_rkd_value)
+        .exe_to_mem_zip(exe_to_mem_zip),
+
+        .data_sram_en(data_sram_en),
+        .data_sram_we(data_sram_we),
+        .data_sram_addr(data_sram_addr),
+        .data_sram_wdata(data_sram_wdata),
+
+        .exe_rf_zip(exe_rf_zip)
     );
 
     MEMU my_memu(
@@ -125,24 +107,16 @@ module mycpu_top(
         .resetn(resetn),
 
         .mem_allowin(mem_allowin),
-        .exe_rf_zip(exe_rf_zip),
         .exe_to_mem_valid(exe_to_mem_valid),
-        .exe_pc(exe_pc),
-        .exe_alu_result(exe_alu_result),
-        .exe_res_from_mem(exe_res_from_mem),
-        .exe_mem_we(exe_mem_we),
-        .exe_rkd_value(exe_rkd_value),
+        .exe_to_mem_zip(exe_to_mem_zip),
 
         .wb_allowin(wb_allowin),
-        .mem_rf_zip(mem_rf_zip),
         .mem_to_wb_valid(mem_to_wb_valid),
-        .mem_pc(mem_pc),
+        .mem_to_wb_zip(mem_to_wb_zip),
 
-        .data_sram_en(data_sram_en),
-        .data_sram_we(data_sram_we),
-        .data_sram_addr(data_sram_addr),
-        .data_sram_wdata(data_sram_wdata),
-        .data_sram_rdata(data_sram_rdata)
+        .data_sram_rdata(data_sram_rdata),
+
+        .mem_rf_zip(mem_rf_zip)
     ) ;
 
     WBU my_wbu(
@@ -150,9 +124,8 @@ module mycpu_top(
         .resetn(resetn),
 
         .wb_allowin(wb_allowin),
-        .mem_rf_zip(mem_rf_zip),
         .mem_to_wb_valid(mem_to_wb_valid),
-        .mem_pc(mem_pc),
+        .mem_to_wb_zip(mem_to_wb_zip),
 
         .debug_wb_pc(debug_wb_pc),
         .debug_wb_rf_we(debug_wb_rf_we),

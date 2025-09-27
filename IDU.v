@@ -1,33 +1,32 @@
+`include "macros.h"
 module IDU(
     input  wire        clk,
     input  wire        resetn,
 
     // Pipeline interface with IF stage
     output wire        id_allowin,
+    input  wire        if_to_id_valid,
     output wire        br_taken,
     output wire [31:0] br_target,
-    input  wire        if_to_id_valid,
-    input  wire [31:0] if_inst,
-    input  wire [31:0] if_pc,
+    input  wire [`IF2ID_LEN - 1:0] if_to_id_zip,
 
     // Pipeline interface with EXE stage
     input  wire        exe_allowin,
-    output wire [5 :0] id_rf_zip,
     output wire        id_to_exe_valid,
-    output reg  [31:0] id_pc,
-    output wire [75:0] id_alu_data_zip,
-    output wire        id_res_from_mem,
-    output wire        id_mem_we,
-    output wire [31:0] id_rkd_value,
+    output wire [`ID2EXE_LEN - 1:0] id_to_exe_zip,
 
-    // Pipeline interface with WB stage
-    input  wire [37:0] wb_rf_zip
+    // Data forwarding to resolve data relevance
+    input  wire [37:0] wb_rf_zip,   // {wb_rf_we, wb_rf_waddr, wb_rf_wdata}
+    input  wire [37:0] mem_rf_zip,  // {mem_rf_we, mem_rf_waddr, mem_rf_wdata}
+    input  wire [38:0] exe_rf_zip   // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
 );
 
     // Pipeline control
     wire        id_ready_go;
+    wire        id_stall;
     reg         id_valid;
     reg  [31:0] inst;
+    reg  [31:0] id_pc;
 
     // ALU control
     wire [11:0] alu_op;
@@ -72,18 +71,33 @@ module IDU(
     wire        src2_is_4;
 
     // Register file interface
-    wire        conflict_r1, conflict_r2;
     wire [ 4:0] rf_raddr1, rf_raddr2;
     wire [31:0] rf_rdata1, rf_rdata2;
-    wire        wb_rf_we, id_rf_we;
-    wire [ 4:0] wb_rf_waddr, id_rf_waddr;
+    wire        id_rf_we;
+    wire [ 4:0] id_rf_waddr;
     wire [31:0] wb_rf_wdata;
+
+    // Data forwarding signals
+    wire        wb_rf_we, mem_rf_we, exe_rf_we;
+    wire [ 4:0] wb_rf_waddr, mem_rf_waddr, exe_rf_waddr;
+    wire [31:0] wb_rf_wdata, mem_rf_wdata, exe_rf_wdata;
+    wire        exe_res_from_mem;
+
+    // TODO: design conflict signals
+    // Data conflict signals
+    wire        conflict_r1_wb, conflict_r2_wb;
+    wire        conflict_r1_mem, conflict_r2_mem;
+    wire        conflict_r1_exe, conflict_r2_exe;
+    wire        need_r1, need_r2;
 
 
     // Pipeline state control
-    assign id_ready_go = 1'b1;
+    // TODO: add stall control for read-after-write from mem
+    assign id_ready_go = ~id_stall;
     assign id_allowin = ~id_valid | (id_ready_go & exe_allowin);
     assign id_to_exe_valid = id_valid & id_ready_go;
+
+    assign id_stall = exe_res_from_mem & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2));
 
     always @(posedge clk) begin
         if (~resetn)
@@ -95,8 +109,7 @@ module IDU(
     // Pipeline register updates
     always @(posedge clk) begin
         if (if_to_id_valid & id_allowin) begin
-            id_pc <= if_pc;
-            inst <= if_inst;
+            {inst, id_pc} <= if_to_id_zip;
         end
     end
 
@@ -202,9 +215,11 @@ module IDU(
     assign rf_raddr2 = src_reg_is_rd ? rd : rk;
     assign id_rf_we = gr_we;
     assign id_rf_waddr = dest;
-    assign id_rf_zip = {id_rf_we, id_rf_waddr};
 
+    // TODO: decode dataforwarding data
     assign {wb_rf_we, wb_rf_waddr, wb_rf_wdata} = wb_rf_zip;
+    assign {mem_rf_we, mem_rf_waddr, mem_rf_wdata} = mem_rf_zip;
+    assign {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_rf_wdata} = exe_rf_zip;
 
     regfile u_regfile(
         .clk    (clk),
@@ -217,15 +232,23 @@ module IDU(
         .wdata  (wb_rf_wdata)
     );
 
-    assign conflict_r1 = (|rf_raddr1) & (rf_raddr1 == wb_rf_waddr);
-    assign conflict_r2 = (|rf_raddr2) & (rf_raddr2 == wb_rf_waddr);
-    assign rj_value = rf_rdata1;
-    assign rkd_value = rf_rdata2;
+    // TODO: redesign conflict signal generation
+    assign conflict_r1_wb   = (|rf_raddr1) & (rf_raddr1 == wb_rf_waddr) & wb_rf_we;
+    assign conflict_r2_wb   = (|rf_raddr2) & (rf_raddr2 == wb_rf_waddr) & wb_rf_we;
+    assign conflict_r1_mem  = (|rf_raddr1) & (rf_raddr1 == mem_rf_waddr) & mem_rf_we;
+    assign conflict_r2_mem  = (|rf_raddr2) & (rf_raddr2 == mem_rf_waddr) & mem_rf_we;
+    assign conflict_r1_exe  = (|rf_raddr1) & (rf_raddr1 == exe_rf_waddr) & exe_rf_we;
+    assign conflict_r2_exe  = (|rf_raddr2) & (rf_raddr2 == exe_rf_waddr) & exe_rf_we;
+    assign need_r1          = ~src1_is_pc & (|alu_op);
+    assign need_r2          = ~src2_is_imm & (|alu_op);
+    assign rj_value  =  conflict_r1_exe ? exe_rf_wdata:
+                        conflict_r1_mem ? mem_rf_wdata:
+                        conflict_r1_wb  ? wb_rf_wdata : rf_rdata1;
+    assign rkd_value =  conflict_r2_exe ? exe_rf_wdata:
+                        conflict_r2_mem ? mem_rf_wdata:
+                        conflict_r2_wb  ? wb_rf_wdata : rf_rdata2;
 
     // Output assignments
-    assign id_alu_data_zip = {alu_op, alu_src1, alu_src2};
-    assign id_mem_we = mem_we;
-    assign id_rkd_value = rkd_value;
-    assign id_res_from_mem = res_from_mem;
+    assign id_to_exe_zip = {alu_op, res_from_mem, alu_src1, alu_src2, mem_we, id_rf_we, id_rf_waddr, rkd_value, id_pc};
 
 endmodule

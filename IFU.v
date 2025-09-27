@@ -1,3 +1,4 @@
+`include "macros.h"
 module IFU(
     input   wire        clk,
     input   wire        resetn,
@@ -11,16 +12,17 @@ module IFU(
 
     // Pipeline interface with ID stage
     input   wire        id_allowin,
+    output  wire        if_to_id_valid,
     input   wire        br_taken,
     input   wire [31:0] br_target,
-    output  wire        if_to_id_valid,
-    output  wire [31:0] if_inst,
-    output  reg  [31:0] if_pc
+    output  wire [`IF2ID_LEN - 1:0] if_to_id_zip
 );
 
     // Pipeline control signals
     reg         if_valid;
+    reg  [31:0] if_pc;
     wire        if_ready_go;
+    wire [31:0] if_inst;
 
     // PC calculation
     wire [31:0] seq_pc;    // sequential PC
@@ -52,5 +54,8 @@ module IFU(
     assign inst_sram_addr = next_pc;
     assign inst_sram_wdata = 32'b0;
     assign if_inst = inst_sram_rdata;
+
+    // Output assignments
+    assign if_to_id_zip = {if_inst, if_pc};
 
 endmodule
