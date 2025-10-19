@@ -23,6 +23,7 @@ module IFU(
     reg  [31:0] if_pc;
     wire        if_ready_go;
     wire [31:0] if_inst;
+    wire        if_allowin;
 
     // PC calculation
     wire [31:0] seq_pc;    // sequential PC

@@ -45,7 +45,7 @@ module WBU(
     end
 
     // Data forwarding
-    assign wb_rf_zip = {wb_rf_we, wb_rf_waddr, wb_rf_wdata};
+    assign wb_rf_zip = {wb_valid ? wb_rf_we : 0, wb_rf_waddr, wb_rf_wdata};
 
     // Debug trace interface
     assign debug_wb_pc = wb_pc;
