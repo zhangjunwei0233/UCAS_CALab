@@ -28,8 +28,8 @@ module IDU(
     reg  [31:0] inst;
     reg  [31:0] id_pc;
 
-    // ALU control
-    wire [11:0] alu_op;
+    // ALU control (extended to 19 bits for multiply/divide operations)
+    wire [18:0] alu_op;
     wire [31:0] alu_src1, alu_src2;
     wire        src1_is_pc, src2_is_imm;
 
@@ -158,6 +158,17 @@ module IDU(
     wire inst_sll_w = ty_R & op_21_20_d[1] & op_19_15_d[14];
     wire inst_srl_w = ty_R & op_21_20_d[1] & op_19_15_d[15];
     wire inst_sra_w = ty_R & op_21_20_d[1] & op_19_15_d[16];
+    
+    // MD: Multiply/Divide instructions
+    //   mul.w mulh.w mulh.wu div.w mod.w div.wu mod.wu
+    wire ty_MD        = op_31_26_d[0] & op_25_22_d[0] & ((inst[21:18] == 4'b0111) | (inst[21:18] == 4'b1000));
+    wire inst_mul_w   = ty_MD & op_21_20_d[1] & (inst[17:15] == 3'b000); 
+    wire inst_mulh_w  = ty_MD & op_21_20_d[1] & (inst[17:15] == 3'b001); 
+    wire inst_mulh_wu = ty_MD & op_21_20_d[1] & (inst[17:15] == 3'b010); 
+    wire inst_div_w   = ty_MD & op_21_20_d[2] & (inst[17:15] == 3'b000); 
+    wire inst_mod_w   = ty_MD & op_21_20_d[2] & (inst[17:15] == 3'b001); 
+    wire inst_div_wu  = ty_MD & op_21_20_d[2] & (inst[17:15] == 3'b010); 
+    wire inst_mod_wu  = ty_MD & op_21_20_d[2] & (inst[17:15] == 3'b011); 
     // S: Reg-Imm Shift
     //   slli.w srli.w srai.w
     wire ty_S        = op_31_26_d[0] & op_25_22_d[1];
@@ -205,7 +216,7 @@ module IDU(
     wire inst_bltu = ty_B & op_31_26_d[26];
     wire inst_bgeu = ty_B & op_31_26_d[27];
 
-    // ALU operation encoding
+    // ALU operation encoding (extended to 18 bits for multiply/divide)
     assign alu_op[0]  = inst_add_w | inst_addi_w | ty_M |
                         inst_jirl  | inst_bl     | inst_pcaddu12i;
     assign alu_op[1]  = inst_sub_w;
@@ -219,6 +230,14 @@ module IDU(
     assign alu_op[9]  = inst_srl_w | inst_srli_w;
     assign alu_op[10] = inst_sra_w | inst_srai_w;
     assign alu_op[11] = inst_lu12i_w;
+    // Multiply/Divide operation encoding
+    assign alu_op[12] = inst_mul_w;    // MUL.W: 32x32->32 (low part)
+    assign alu_op[13] = inst_mulh_w;   // MULH.W: 32x32->32 (high part, signed)
+    assign alu_op[14] = inst_mulh_wu;  // MULH.WU: 32x32->32 (high part, unsigned)
+    assign alu_op[15] = inst_div_w;    // DIV.W: signed division
+    assign alu_op[16] = inst_mod_w;    // MOD.W: signed modulo
+    assign alu_op[17] = inst_div_wu;   // DIV.WU: unsigned division
+    assign alu_op[18] = inst_mod_wu;   // MOD.WU: unsigned modulo
 
     // Immediate type selection
     assign need_ui5  = ty_S;
@@ -285,7 +304,7 @@ module IDU(
     assign conflict_r1_exe  = (|rf_raddr1) & (rf_raddr1 == exe_rf_waddr) & exe_rf_we;
     assign conflict_r2_exe  = (|rf_raddr2) & (rf_raddr2 == exe_rf_waddr) & exe_rf_we;
     assign need_r1          = ~src1_is_pc & (|alu_op);
-    assign need_r2          = ~src2_is_imm & (|alu_op);
+    assign need_r2          = ~src2_is_imm & ((|alu_op[11:0]) | ty_MD);
     assign rj_value  =  conflict_r1_exe ? exe_rf_wdata:
                         conflict_r1_mem ? mem_rf_wdata:
                         conflict_r1_wb  ? wb_rf_wdata : rf_rdata1;
@@ -294,7 +313,7 @@ module IDU(
                         conflict_r2_wb  ? wb_rf_wdata : rf_rdata2;
 
     // Output assignments
-    //                      12      1             32        32        4       1         5            32         32
+    //                      19      1             32        32        4       1         5            32         32
     assign id_to_exe_zip = {alu_op, res_from_mem, alu_src1, alu_src2, mem_op, id_rf_we, id_rf_waddr, rkd_value, id_pc};
 
 endmodule
