@@ -17,7 +17,7 @@ module IDU(
 
     // Data forwarding to resolve data relevance
     input  wire [37:0] wb_rf_zip,   // {wb_rf_we, wb_rf_waddr, wb_rf_wdata}
-    input  wire [37:0] mem_rf_zip,  // {mem_rf_we, mem_rf_waddr, mem_rf_wdata}
+    input  wire [38:0] mem_rf_zip,  // {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_rf_wdata}
     input  wire [38:0] exe_rf_zip   // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
 );
 
@@ -74,7 +74,7 @@ module IDU(
     wire        wb_rf_we, mem_rf_we, exe_rf_we;
     wire [ 4:0] wb_rf_waddr, mem_rf_waddr, exe_rf_waddr;
     wire [31:0] wb_rf_wdata, mem_rf_wdata, exe_rf_wdata;
-    wire        exe_res_from_mem;
+    wire        mem_res_from_mem, exe_res_from_mem;
 
     // Data conflict signals
     wire        conflict_r1_wb, conflict_r2_wb;
@@ -88,7 +88,8 @@ module IDU(
     assign id_allowin = ~id_valid | (id_ready_go & exe_allowin);
     assign id_to_exe_valid = id_valid & id_ready_go;
 
-    assign id_stall = exe_res_from_mem & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2));
+    assign id_stall = (exe_res_from_mem & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2))) |
+                      (mem_res_from_mem & ((conflict_r1_mem & need_r1) | (conflict_r2_mem & need_r2)));
 
     always @(posedge clk) begin
         if (~resetn)
@@ -283,7 +284,7 @@ module IDU(
 
     // Decode dataforwarding data
     assign {wb_rf_we, wb_rf_waddr, wb_rf_wdata} = wb_rf_zip;
-    assign {mem_rf_we, mem_rf_waddr, mem_rf_wdata} = mem_rf_zip;
+    assign {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_rf_wdata} = mem_rf_zip;
     assign {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_rf_wdata} = exe_rf_zip;
 
     regfile u_regfile(

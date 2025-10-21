@@ -17,7 +17,7 @@ module MEMU(
     input  wire [31:0] data_sram_rdata,
 
     // Data forwarding to ID stage
-    output wire [37:0] mem_rf_zip
+    output wire [38:0] mem_rf_zip
 );
     // Pipeline control
     wire        mem_ready_go;
@@ -89,7 +89,7 @@ module MEMU(
     assign mem_rf_wdata = mem_res_from_mem ? mem_data : mem_alu_result;
 
     // Data forwarding
-    assign mem_rf_zip = {mem_valid ? mem_rf_we : 0, mem_rf_waddr, mem_rf_wdata};
+    assign mem_rf_zip = {mem_res_from_mem, mem_valid & mem_rf_we, mem_rf_waddr, mem_alu_result};
 
     // Pipeline output to WB stage
     assign mem_to_wb_zip = {mem_rf_we, mem_rf_waddr, mem_rf_wdata, mem_pc};

@@ -39,7 +39,7 @@ module mycpu_top(
 
     // Data forwarding
     wire [37:0] wb_rf_zip;
-    wire [37:0] mem_rf_zip;
+    wire [38:0] mem_rf_zip;
     wire [38:0] exe_rf_zip;
 
     // Brach resolving
