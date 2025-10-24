@@ -1,0 +1,74 @@
+# LaTeX 编译生成的临时文件
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+*.xdv
+*.figlist
+*.makefile
+*.fignore
+
+# BibTeX 相关文件
+*.bib.bak
+*.bib.sav
+
+# 索引文件
+*.idx
+*.ilg
+*.ind
+
+# 术语表文件
+*.acn
+*.acr
+*.glg
+*.glo
+*.gls
+*.glsdefs
+
+# 算法包生成的文件
+*.alg
+*.loa
+
+# 代码清单包生成的文件
+*.lol
+
+# 多语言包生成的文件
+*.auxlock
+
+# 临时目录
+.texpadtmp/
+
+# Kile 项目文件
+*.kilepr
+
+# TeXnicCenter 项目文件
+*.tcp
+*.tps
+
+# WinEdt 项目文件
+*.wpr
+
+# Texmaker 项目文件
+*.fdb_latexmk
+*.synctex(busy)
+
+# TeXstudio 项目文件
+*.txss
+
+# LyX 备份文件
+*.lyx~
+
+# PDF 输出文件
+# *.pdf
