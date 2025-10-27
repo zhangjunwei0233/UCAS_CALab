@@ -4,7 +4,7 @@
 \geometry{left=2.0cm,right=2.0cm,top=2.5cm,bottom=2.5cm}
 
 \usepackage{ctex} % 支持中文的LaTeX宏包
-\usepackage{amsmath,amsfonts,graphicx,subfigure,amssymb,bm,amsthm,mathrsfs,mathtools,breqn} % 数学公式和符号的宏包集合
+\usepackage{amsmath,amsfonts,graphicx,amssymb,bm,amsthm,mathrsfs,mathtools,breqn} % 数学公式和符号的宏包集合
 \usepackage{algorithm,algorithmicx} % 算法和伪代码
 \usepackage[noend]{algpseudocode} % 算法和伪代码
 \usepackage{fancyhdr} % 自定义页眉页脚
@@ -60,9 +60,9 @@
 \crefname{table}{Table.}{Tabs.}
 
 % \setmainfont{Palatino Linotype.ttf}
-% \setCJKmainfont{SimHei.ttf}
-% \setCJKsansfont{Songti.ttf}
-% \setCJKmonofont{SimSun.ttf}
+\setCJKmainfont{SimHei.ttf}
+\setCJKsansfont{Songti.ttf}
+\setCJKmonofont{SimSun.ttf}
 \punctstyle{kaiming}
 % 偏好的几个字体, 可以根据需要自行加入字体ttf文件并调用
 
@@ -137,12 +137,28 @@
 
 \subsection{关键设计模块}
 
-\subsubsection{逻辑运算、转移与访存指令的实现}
+\subsubsection{简单算数逻辑运算、转移与访存指令的实现}
+
+\begin{itemize}
+
+\item \textbf{简单算数逻辑运算}
+
+  对于简单算数逻辑运算，其需要用到的功能部件都已经在之前的实验中实现，故只需要添加相应的译码逻辑和控制信号即可。其中，pcaddu12i 指令需要使用 PC 作为其中一个操作数，为此可以复用转移指令计算链接地址的通路。
+
+\item \textbf{转移指令}
+
+  新增的四条转移指令都是条件转移，与已经实现的 beq, bne 指令类似，可以复用跳转和冲刷的相关逻辑，只需要添加额外的转移条件计算及选择逻辑。
+
+\item \textbf{访存指令}
+
+  字节和半字的访存指令需要对总线数据进行额外的处理，以保证访存请求总是按照四字节对齐。对于 load 指令，根据地址最低2位选择合适的数据切片，并进行零扩展（ld.bu, ld.hu）或符号扩展（ld.b, ld.h）；对于 store 指令，根据地址最低2位将待写入的数据进行移位，并设置写掩码。
+
+\end{itemize}
 
 \subsubsection{乘除法模块的设计与封装}
 
 为支持 mul.w/mulh.w/mulh.wu 与
-div.w/mod.w/div.wu/mod.wu，本项目将乘法与除法拆分为两个独立的多周期运算单元，并通过清晰的握手信号与 EXE 阶段对接。二者均以 32 位宽（可参数化 XLEN=32）为核心数据通道，使用移位-累加与恢复余数两类经典迭代算法，保证硬件资源可控与时序友好。、
+div.w/mod.w/div.wu/mod.wu，本项目将乘法与除法拆分为两个独立的多周期运算单元，并通过清晰的握手信号与 EXE 阶段对接。二者均以 32 位宽（可参数化 XLEN=32）为核心数据通道，使用移位-累加与恢复余数两类经典迭代算法，保证硬件资源可控与时序友好。
 
 \begin{itemize}
 
@@ -348,9 +364,20 @@ assign start_multicycle = is_multicycle_op & start_exe;  // Special time stamp
 
 此后，根据start\_multicycle信号，便可以正常对流水线控制信号进行赋值（具体见上文设计分析部分，这里不再赘述）。
 
-\subsection{XX问题}
+\subsection{访存级前递路径过长问题}
 
-\subsection{XX问题}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/timing_violation.png}
+  \caption{时序违例情况}
+  \label{fig:timing_violation}
+\end{figure}
+
+最初的设计在进行布局布线时，出现了时序严重违例的情况。查看具体路径发现：如果要完全消除 load-to-use 冲突，考虑访存结果参与条件转移的情况，则存在以下的组合逻辑路径：
+
+Data BRAM 输出端 $\longrightarrow$ 符号扩展 $\longrightarrow$ IDU 多路选择器 $\longrightarrow$ 转移条件生成 $\longrightarrow$ 转移目标生成 $\longrightarrow$ Inst BRAM 输入端
+
+因此考虑截断上述组合逻辑。出现 load-to-use 冲突时，在 ID 级插入一个气泡，同时不前递 MEM 级的访存结果（但仍需传递 MEM 级指令在 EXE 级生成的结果）。实际访存结果在 WB 级前递。
 
 \section{实验结果}
 
@@ -360,7 +387,7 @@ assign start_multicycle = is_multicycle_op & start_exe;  // Special time stamp
 
 \section{小组成员分工}
 
-陈琛：
+陈琛：实现了除了乘除法以外的用户态指令，进行了仿真和上板测试，并修复了时序违例。
 
 张钧玮：负责乘除法运算单元的设计与调试，调整运算算法以简化电路确保时序友好。
 

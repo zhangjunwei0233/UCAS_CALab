@@ -1,3 +1,5 @@
+*/auto/
+
 # LaTeX 编译生成的临时文件
 *.aux
 *.bbl
