@@ -141,6 +141,93 @@
 
 \subsubsection{乘除法模块的设计与封装}
 
+为支持 mul.w/mulh.w/mulh.wu 与
+div.w/mod.w/div.wu/mod.wu，本项目将乘法与除法拆分为两个独立的多周期运算单元，并通过清晰的握手信号与 EXE 阶段对接。二者均以 32 位宽（可参数化 XLEN=32）为核心数据通道，使用移位-累加与恢复余数两类经典迭代算法，保证硬件资源可控与时序友好。、
+
+\begin{itemize}
+
+\item \textbf{模块接口与时序约束} 
+
+两个模块的基本接口如下（节选接口，省略若干内寄存器与中间连线）：
+    
+\begin{lstlisting}[language=verilog]
+// mul.v（32x32 → 64，支持有/无符号）
+module mul #(
+    parameter XLEN = 32
+)(
+    input  wire                  clk,
+    input  wire                  resetn,
+    input  wire                  start,        // 单拍启动脉冲
+    input  wire                  signed_mode,  // 1：有符号；0：无符号
+    input  wire [XLEN-1:0]       op_a,
+    input  wire [XLEN-1:0]       op_b,
+    output wire                  busy,         // 运算进行中
+    output wire                  done,         // 单次运算完成（脉冲）
+    output wire [2*XLEN-1:0]     product       // 64 位乘积
+);
+\end{lstlisting}
+    
+\begin{lstlisting}[language=verilog]
+// div.v（32/32 → 32 商 + 32 余数，支持有/无符号）
+module div #(
+    parameter XLEN = 32
+)(
+    input  wire            clk,
+    input  wire            resetn,
+    input  wire            start,           // 单拍启动脉冲
+    input  wire            signed_mode,     // 1：有符号；0：无符号
+    input  wire [XLEN-1:0] dividend,
+    input  wire [XLEN-1:0] divisor,
+    output wire            busy,            // 运算进行中
+    output wire            done,            // 单次运算完成（脉冲）
+    output wire            divide_by_zero,  // 除数为 0 标志
+    output wire [XLEN-1:0] quotient,        // 商
+    output wire [XLEN-1:0] remainder        // 余数
+);
+\end{lstlisting}
+    
+start 仅在指令发射到 EXE 的首拍拉高；单元据此锁存操作数并拉高 busy，直至迭代结束拉低 busy、同时产生单拍 done。流水线侧通过 exe\_ready\_go/allowin 与 busy/done 联动，保障多周期期间暂停推进，完成后再释放（对应 3.3 小节的多周期 FSM 控制）。
+    
+\item \textbf{符号处理与绝对值通道} 
+    
+两单元均以统一的无符号迭代内核实现有/无符号两种语义。做法是：
+
+1. 在 \texttt{signed\_mode=1} 时，先对被乘数/被除数求绝对值（两数取幅值），内部以无符号路径迭代；
+
+2. 乘法：最终结果的符号由两操作数符号异或得到；若为负，则对 64 位乘积做二进制补码取反加一；
+
+3. 除法：内部先得到无符号的 商|余，最终根据被除数/除数符号恢复商的符号，余数符号与被除数一致（与指令集定义相容）；同时在 \texttt{divisor=0} 时置位 \texttt{divide\_by\_zero} 并给出约定结果（实现中为合法的零/保持模式）。
+
+\item \textbf{乘法：移位-部分积累加（Shift–Add）}
+    
+乘法器采用一位/一拍的移位-累加结构：
+
+$\bullet$ 迭代寄存器：\texttt{acc\_r}（累加器，承载部分积）、\texttt{multiplicand\_r}、\texttt{multiplier\_r} 与 \texttt{count\_r}（循环计数，宽度 \texttt{COUNT\_WIDTH=\$clog2(XLEN)+1} ）；
+
+$\bullet$ 每拍操作：检查 \texttt{multiplier\_r[0]}，若为 1 则 \texttt{acc\_r += multiplicand\_r}；随后 \texttt{multiplicand\_r} 左移一位，\texttt{multiplier\_r} 右移一位，\texttt{count\_r--}；
+
+$\bullet$ 结束条件：当 \texttt{count\_r==1} 时进入最后一次累加/移位，下一拍置 \texttt{done=1}、\texttt{busy=0}，\texttt{product} 输出稳定（含已完成的符号修正）。
+
+该结构每次只做一次 32/64 位加法与移位，时序友好、面积较小；代价是潜在的 32 拍延迟。
+
+\item \textbf{除法：恢复余数法（Restoring Division）}
+
+除法器采用恢复余数法，一拍处理一位，被除数自高位至低位移入：
+
+$\bullet$ 关键寄存器：\texttt{remainder_mag_r}（当前余数幅值）、\texttt{quotient_mag_r}（当前商幅值）、\texttt{dividend_shift_r}（被除数移位源）、\texttt{divisor_mag_r}（除数幅值）、\texttt{count\_r}；
+
+$\bullet$ 每拍流程：
+
+\hspace{2em} 1. 余数左移一位并移入 \texttt{dividend\_shift\_r} 的下一位；
+
+\hspace{2em} 2. 试减 \texttt{divisor\_mag\_r} 得到 \texttt{remainder\_sub}；
+
+\hspace{2em} 3. 若试减结果非负（\texttt{ge\_candidate}），则记 1（当前位商为 1），余数采纳 \texttt{remainder\_sub}；否则当前位商为 0，余数保留；
+
+\hspace{2em} 4. \texttt{count\_r--}，直到 \texttt{last\_cycle}；
+
+\end{itemize}
+
 \subsubsection{乘除法指令的多周期实现}
 
 首先，将ALU操作码的位宽从原有的12位扩展到19位，以支持新增的乘除法指令。在IDU模块中，修改alu\_op的定义，将乘除法指令编码到高位。具体实现中，alu\_op[12]到alu\_op[18]分别对应mul.w、mulh.w、mulh.wu、div.w、mod.w、div.wu和mod.wu指令：
@@ -267,17 +354,15 @@ assign start_multicycle = is_multicycle_op & start_exe;  // Special time stamp
 
 \section{实验结果}
 
-……
 
 所有测试均通过验证，证明了我们实现的CPU能够正确支持所有新增的用户态指令。
 
-\section{实验总结与心得感想}
 
 \section{小组成员分工}
 
 陈琛：
 
-张钧玮：
+张钧玮：负责乘除法运算单元的设计与调试，调整运算算法以简化电路确保时序友好。
 
 王荦璠：将乘除法模块集成到流水线CPU中，处理乘除法指令的多周期执行特性与流水线单周期推进的矛盾，协调新增指令与原有流水线结构的兼容性。
 
