@@ -3,6 +3,9 @@ module EXEU(
     input  wire        clk,
     input  wire        resetn,
 
+    // Global flush from WB (exception/ertn)
+    input  wire        flush,
+
     // Pipeline interface with ID stage
     output wire        exe_allowin,
     input  wire        id_to_exe_valid,
@@ -35,6 +38,11 @@ module EXEU(
     reg  [31:0] exe_rkd_value;
     reg         exe_rf_we;
     reg  [ 4:0] exe_rf_waddr;
+    // Exception pipeline fields
+    reg         exe_ex_valid;
+    reg  [5:0]  exe_ecode;
+    reg  [8:0]  exe_esubcode;
+    reg         exe_is_ertn;
 
     wire [31:0] exe_alu_result;
     wire [31:0] final_result;
@@ -86,6 +94,8 @@ module EXEU(
     always @(posedge clk) begin
         if (~resetn)
             exe_valid <= 1'b0;
+        else if (flush)
+            exe_valid <= 1'b0;
         else if (multicycle_executing | (id_to_exe_valid & exe_allowin) | start_multicycle)
             exe_valid <= 1'b1;
         else
@@ -96,7 +106,7 @@ module EXEU(
     reg start_exe;
     always @(posedge clk) begin
         if (id_to_exe_valid & exe_allowin) begin
-            {exe_alu_op, exe_res_from_mem, exe_alu_src1, exe_alu_src2, exe_mem_op, exe_rf_we, exe_rf_waddr, exe_rkd_value, exe_pc} <= id_to_exe_zip;
+            {exe_alu_op, exe_res_from_mem, exe_alu_src1, exe_alu_src2, exe_mem_op, exe_rf_we, exe_rf_waddr, exe_rkd_value, exe_pc, exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn} <= id_to_exe_zip;
             start_exe <= 1'b1;
         end else
             start_exe <= 1'b0;
@@ -168,7 +178,7 @@ module EXEU(
     wire addr1 = (exe_alu_result[1:0] == 2'd1);
     wire addr2 = (exe_alu_result[1:0] == 2'd2);
     wire addr3 = (exe_alu_result[1:0] == 2'd3);
-    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_valid;
+    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_valid & ~exe_ex_valid & ~exe_is_ertn;
     assign data_sram_we     = // st.b
                               (exe_mem_op == 4) ?
                               ( addr0 ? 4'b0001 :
@@ -205,10 +215,10 @@ module EXEU(
                               32'd0;
 
     // Forward data to IDU
-    assign exe_rf_zip = {exe_valid & exe_res_from_mem, exe_valid & exe_rf_we, exe_rf_waddr, final_result};
+    assign exe_rf_zip = {exe_valid & exe_res_from_mem, exe_valid & exe_rf_we & ~exe_ex_valid & ~exe_is_ertn, exe_rf_waddr, final_result};
 
     // Output assignment
-    //                       39          4           32
-    assign exe_to_mem_zip = {exe_rf_zip, exe_mem_op, exe_pc};
+    //                       39          4           32        1           6           9           1
+    assign exe_to_mem_zip = {exe_rf_zip, exe_mem_op, exe_pc, exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn};
 
 endmodule

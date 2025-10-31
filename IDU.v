@@ -3,6 +3,9 @@ module IDU(
     input  wire        clk,
     input  wire        resetn,
 
+    // Global flush from WB (exception/ertn)
+    input  wire        flush,
+
     // Pipeline interface with IF stage
     output wire        id_allowin,
     input  wire        if_to_id_valid,
@@ -93,6 +96,8 @@ module IDU(
 
     always @(posedge clk) begin
         if (~resetn)
+            id_valid <= 1'b0;
+        else if (flush)
             id_valid <= 1'b0;
         else if (br_taken)
             id_valid <= 1'b0;
@@ -240,6 +245,18 @@ module IDU(
     assign alu_op[17] = inst_div_wu;   // DIV.WU: unsigned division
     assign alu_op[18] = inst_mod_wu;   // MOD.WU: unsigned modulo
 
+    // Privileged and system instructions
+    // syscall: inst[31:15] == 17'b00000000001010110, inst[14:0] = code
+    wire inst_syscall = (inst[31:15] == 17'b00000000001010110);
+    // ertn: exact 32-bit encoding 00000110010010000011100000000000
+    wire inst_ertn   = (inst == 32'b00000110010010000011100000000000);
+
+    // Exception fields
+    wire        id_ex_valid   = inst_syscall; // only syscall in exp12
+    wire [5:0]  id_ecode      = inst_syscall ? `ECODE_SYS : 6'd0;
+    wire [7:0]  id_esubcode   = inst_syscall ? `ESUBCODE_NONE : 8'd0;
+    wire        id_is_ertn    = inst_ertn;
+
     // Immediate type selection
     assign need_ui5  = ty_S;
     assign need_si12 = (ty_I & ~inst_andi & ~inst_ori & ~inst_xori) | ty_M;
@@ -268,7 +285,7 @@ module IDU(
 
     assign res_from_mem = ty_M_LD;
     assign dst_is_r1 = inst_bl;
-    assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b) & id_valid;
+    assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_ertn) & id_valid;
     assign mem_op = {4{ty_M}} & op_25_22;
     assign dest = dst_is_r1 ? 5'd1 : rd;
 
@@ -314,7 +331,7 @@ module IDU(
                         conflict_r2_wb  ? wb_rf_wdata : rf_rdata2;
 
     // Output assignments
-    //                      19      1             32        32        4       1         5            32         32
-    assign id_to_exe_zip = {alu_op, res_from_mem, alu_src1, alu_src2, mem_op, id_rf_we, id_rf_waddr, rkd_value, id_pc};
+    //                      19      1             32        32        4       1         5            32         32      1            6         9           1
+    assign id_to_exe_zip = {alu_op, res_from_mem, alu_src1, alu_src2, mem_op, id_rf_we, id_rf_waddr, rkd_value, id_pc, id_ex_valid, id_ecode, id_esubcode, id_is_ertn};
 
 endmodule

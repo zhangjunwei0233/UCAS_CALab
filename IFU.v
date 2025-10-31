@@ -3,6 +3,10 @@ module IFU(
     input   wire        clk,
     input   wire        resetn,
 
+    // Global flush from WB (exception/ertn)
+    input   wire        flush,
+    input   wire [31:0] flush_target,
+
     // Instruction SRAM interface
     output  wire        inst_sram_en,
     output  wire [ 3:0] inst_sram_we,
@@ -31,7 +35,7 @@ module IFU(
 
     // Pipeline state control
     assign if_ready_go = 1'b1;
-    assign if_allowin = ~if_valid | (if_ready_go & id_allowin);
+    assign if_allowin = ~if_valid | (if_ready_go & id_allowin) | flush;
     assign if_to_id_valid = if_valid & if_ready_go;
 
     always @(posedge clk) begin
@@ -40,11 +44,13 @@ module IFU(
 
     // PC generation
     assign seq_pc = if_pc + 32'h4;
-    assign next_pc = br_taken ? br_target : seq_pc;
+    assign next_pc = flush ? flush_target : (br_taken ? br_target : seq_pc);
 
     always @(posedge clk) begin
         if (~resetn)
             if_pc <= 32'h1bfffffc;
+        else if (flush)
+            if_pc <= flush_target;
         else if (if_allowin)
             if_pc <= next_pc;
     end

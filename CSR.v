@@ -14,12 +14,13 @@ module CSR
    input wire         ipi_int_in,
 
    output wire [31:0] ex_entry,
+   output wire [31:0] era,
    output wire        has_int,
    input wire         ertn_flush,
    input wire         wb_ex,
    input wire [31:0]  wb_pc,
    input wire [5:0]   wb_ecode,
-   input wire [7:0]   wb_esubcode
+   input wire [8:0]   wb_esubcode
    );
 
 `define CSR_CRMD        0
@@ -195,6 +196,7 @@ module CSR
                          ({32{csr_num == `CSR_EENTRY}} & csr_eentry) );
 
     assign ex_entry = {csr_eentry_va, 6'd0};
+    assign era = csr_era;
     assign has_int = csr_crmd_ie;
 
 endmodule // CSR

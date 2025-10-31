@@ -46,9 +46,33 @@ module mycpu_top(
     wire        br_taken;
     wire [31:0] br_target;
 
+    // Global flush (exception/ertn)
+    wire        flush;
+    wire [31:0] flush_target;
+
+    // CSR interface
+    wire [31:0] csr_ex_entry;
+    wire [31:0] csr_era;
+    wire        csr_has_int;
+    wire        csr_ertn_flush;
+    wire        csr_wb_ex;
+    wire [31:0] csr_wb_pc;
+    wire [5:0]  csr_wb_ecode;
+    wire [7:0]  csr_wb_esubcode;
+
+    // WBU exception/ertn info
+    wire        wb_ex_valid;
+    wire [31:0] wb_ex_pc;
+    wire [5:0]  wb_ecode;
+    wire [7:0]  wb_esubcode;
+    wire        wb_is_ertn;
+
     IFU my_ifu(
         .clk(clk),
         .resetn(resetn),
+
+        .flush(flush),
+        .flush_target(flush_target),
 
         .inst_sram_en(inst_sram_en),
         .inst_sram_we(inst_sram_we),
@@ -66,6 +90,8 @@ module mycpu_top(
     IDU my_idu(
         .clk(clk),
         .resetn(resetn),
+
+        .flush(flush),
 
         .id_allowin(id_allowin),
         .br_taken(br_taken),
@@ -85,6 +111,7 @@ module mycpu_top(
     EXEU my_exeu(
         .clk(clk),
         .resetn(resetn),
+        .flush(flush),
         
         .exe_allowin(exe_allowin),
         .id_to_exe_valid(id_to_exe_valid),
@@ -105,6 +132,7 @@ module mycpu_top(
     MEMU my_memu(
         .clk(clk),
         .resetn(resetn),
+        .flush(flush),
 
         .mem_allowin(mem_allowin),
         .exe_to_mem_valid(exe_to_mem_valid),
@@ -132,6 +160,39 @@ module mycpu_top(
         .debug_wb_rf_wnum(debug_wb_rf_wnum),
         .debug_wb_rf_wdata(debug_wb_rf_wdata),
 
-        .wb_rf_zip(wb_rf_zip)
+        .wb_rf_zip(wb_rf_zip),
+        .wb_ex_valid(wb_ex_valid),
+        .wb_ex_pc(wb_ex_pc),
+        .wb_ecode(wb_ecode),
+        .wb_esubcode(wb_esubcode),
+        .wb_is_ertn(wb_is_ertn)
     );
+
+    // CSR instance (minimal wiring for exp12)
+    CSR u_csr(
+        .clk(clk),
+        .resetn(resetn),
+
+        .csr_re(1'b0),
+        .csr_num(14'd0),
+        .csr_rvalue(),
+        .csr_we(1'b0),
+        .csr_wmask(32'd0),
+        .csr_wvalue(32'd0),
+
+        .hw_int_in(8'd0),
+        .ipi_int_in(1'b0),
+
+        .ex_entry(csr_ex_entry),
+        .era(csr_era),
+        .has_int(csr_has_int),
+        .ertn_flush(wb_is_ertn),
+        .wb_ex(wb_ex_valid),
+        .wb_pc(wb_ex_pc),
+        .wb_ecode(wb_ecode),
+        .wb_esubcode(wb_esubcode)
+    );
+
+    assign flush = wb_is_ertn | wb_ex_valid;
+    assign flush_target = wb_is_ertn ? csr_era : csr_ex_entry;
 endmodule
