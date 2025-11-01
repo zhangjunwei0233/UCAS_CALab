@@ -38,9 +38,13 @@ module mycpu_top(
     wire [`MEM2WB_LEN  - 1:0]   mem_to_wb_zip;
 
     // Data forwarding
-    wire [37:0] wb_rf_zip;
-    wire [38:0] mem_rf_zip;
-    wire [38:0] exe_rf_zip;
+    wire [38:0] wb_rf_zip;
+    wire [39:0] mem_rf_zip;
+    wire [39:0] exe_rf_zip;
+
+    // Exception Signal forwarding
+    wire        wb_ex;
+    wire        mem_ex;
 
     // Brach resolving
     wire        br_taken;
@@ -54,17 +58,18 @@ module mycpu_top(
     wire [31:0] csr_ex_entry;
     wire [31:0] csr_era;
     wire        csr_has_int;
-    wire        csr_ertn_flush;
-    wire        csr_wb_ex;
-    wire [31:0] csr_wb_pc;
-    wire [5:0]  csr_wb_ecode;
-    wire [7:0]  csr_wb_esubcode;
+    wire        csr_re;
+    wire [13:0] csr_num;
+    wire [31:0] csr_rvalue;
+    wire        csr_we;
+    wire [31:0] csr_wmask;
+    wire [31:0] csr_wvalue;
 
     // WBU exception/ertn info
     wire        wb_ex_valid;
     wire [31:0] wb_ex_pc;
     wire [5:0]  wb_ecode;
-    wire [7:0]  wb_esubcode;
+    wire [8:0]  wb_esubcode;
     wire        wb_is_ertn;
 
     IFU my_ifu(
@@ -126,7 +131,9 @@ module mycpu_top(
         .data_sram_addr(data_sram_addr),
         .data_sram_wdata(data_sram_wdata),
 
-        .exe_rf_zip(exe_rf_zip)
+        .exe_rf_zip(exe_rf_zip),
+        .mem_ex(mem_ex),
+        .wb_ex(wb_ex)
     );
 
     MEMU my_memu(
@@ -144,7 +151,8 @@ module mycpu_top(
 
         .data_sram_rdata(data_sram_rdata),
 
-        .mem_rf_zip(mem_rf_zip)
+        .mem_rf_zip(mem_rf_zip),
+        .mem_ex(mem_ex)
     ) ;
 
     WBU my_wbu(
@@ -161,11 +169,19 @@ module mycpu_top(
         .debug_wb_rf_wdata(debug_wb_rf_wdata),
 
         .wb_rf_zip(wb_rf_zip),
+        .wb_ex(wb_ex),
         .wb_ex_valid(wb_ex_valid),
         .wb_ex_pc(wb_ex_pc),
         .wb_ecode(wb_ecode),
         .wb_esubcode(wb_esubcode),
-        .wb_is_ertn(wb_is_ertn)
+        .wb_is_ertn(wb_is_ertn),
+
+        .csr_re(csr_re),
+        .csr_we(csr_we),
+        .csr_num(csr_num),
+        .csr_wmask(csr_wmask),
+        .csr_wvalue(csr_wvalue),
+        .csr_rvalue(csr_rvalue)
     );
 
     // CSR instance (minimal wiring for exp12)
@@ -173,12 +189,12 @@ module mycpu_top(
         .clk(clk),
         .resetn(resetn),
 
-        .csr_re(1'b0),
-        .csr_num(14'd0),
-        .csr_rvalue(),
-        .csr_we(1'b0),
-        .csr_wmask(32'd0),
-        .csr_wvalue(32'd0),
+        .csr_re(csr_re),
+        .csr_num(csr_num),
+        .csr_rvalue(csr_rvalue),
+        .csr_we(csr_we),
+        .csr_wmask(csr_wmask),
+        .csr_wvalue(csr_wvalue),
 
         .hw_int_in(8'd0),
         .ipi_int_in(1'b0),

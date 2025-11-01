@@ -23,7 +23,11 @@ module EXEU(
     output wire [31:0] data_sram_wdata,
 
     // Data forwarding to ID stage
-    output wire [38:0] exe_rf_zip      // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
+    output wire [39:0] exe_rf_zip,     // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
+
+    // Exception signal forwarding from MEM and WB stage
+    input wire         mem_ex,
+    input wire         wb_ex
 );
 
     // Pipeline control
@@ -38,6 +42,12 @@ module EXEU(
     reg  [31:0] exe_rkd_value;
     reg         exe_rf_we;
     reg  [ 4:0] exe_rf_waddr;
+    // CSR pipeline fields
+    reg         exe_csr_read;
+    reg         exe_csr_we;
+    reg  [13:0] exe_csr_num;
+    reg  [31:0] exe_csr_wmask;
+    reg  [31:0] exe_csr_wvalue;
     // Exception pipeline fields
     reg         exe_ex_valid;
     reg  [5:0]  exe_ecode;
@@ -106,11 +116,24 @@ module EXEU(
     reg start_exe;
     always @(posedge clk) begin
         if (id_to_exe_valid & exe_allowin) begin
-            {exe_alu_op, exe_res_from_mem, exe_alu_src1, exe_alu_src2, exe_mem_op, exe_rf_we, exe_rf_waddr, exe_rkd_value, exe_pc, exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn} <= id_to_exe_zip;
+            {exe_alu_op, exe_res_from_mem, exe_alu_src1, exe_alu_src2, exe_mem_op, exe_rf_we, exe_rf_waddr,
+             exe_rkd_value, exe_pc, exe_csr_read, exe_csr_we, exe_csr_num, exe_csr_wmask, exe_csr_wvalue,
+             exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn} <= id_to_exe_zip;
             start_exe <= 1'b1;
         end else
             start_exe <= 1'b0;
     end
+
+
+    // Exception generation (non for now)
+    wire        exe_gen_ex_valid = 1'b0;
+    wire [5:0]  exe_gen_ecode    = 6'd0;
+    wire [8:0]  exe_gen_esubcode = 9'd0;
+
+    wire        exe_to_mem_ex_valid = exe_gen_ex_valid ? 1'b1 : exe_ex_valid;
+    wire [5:0]  exe_to_mem_ecode    = exe_gen_ex_valid ? exe_gen_ecode : exe_ecode;
+    wire [8:0]  exe_to_mem_esubcode = exe_gen_ex_valid ? exe_gen_esubcode : exe_esubcode;
+    wire        exe_to_mem_is_ertn  = exe_is_ertn;
 
     // ALU instantiation (only handles first 12 bits for regular ALU operations)
     alu u_alu(
@@ -178,8 +201,12 @@ module EXEU(
     wire addr1 = (exe_alu_result[1:0] == 2'd1);
     wire addr2 = (exe_alu_result[1:0] == 2'd2);
     wire addr3 = (exe_alu_result[1:0] == 2'd3);
-    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_valid & ~exe_ex_valid & ~exe_is_ertn;
-    assign data_sram_we     = // st.b
+    wire [3:0] _data_sram_we;
+
+    wire        exe_mem_request_ok = exe_valid & ~(mem_ex | wb_ex | exe_to_mem_ex_valid | exe_to_mem_is_ertn);
+
+    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_mem_request_ok;
+    assign _data_sram_we    = // st.b
                               (exe_mem_op == 4) ?
                               ( addr0 ? 4'b0001 :
                                 addr1 ? 4'b0010 :
@@ -195,6 +222,7 @@ module EXEU(
                               (exe_mem_op == 6) ?
                               ( 4'b1111 ) :
                               4'b0;
+    assign data_sram_we = data_sram_en ? _data_sram_we : 4'b0000;
     assign data_sram_addr   = exe_alu_result & ~32'd3; // Alignment
     assign data_sram_wdata  = // st.b
                               (exe_mem_op == 4) ?
@@ -215,10 +243,33 @@ module EXEU(
                               32'd0;
 
     // Forward data to IDU
-    assign exe_rf_zip = {exe_valid & exe_res_from_mem, exe_valid & exe_rf_we & ~exe_ex_valid & ~exe_is_ertn, exe_rf_waddr, final_result};
+    assign exe_rf_zip = {
+            exe_valid & exe_csr_read,
+            exe_valid & exe_res_from_mem,
+            exe_valid & exe_rf_we,
+            exe_rf_waddr,
+            final_result
+    };
 
     // Output assignment
-    //                       39          4           32        1           6           9           1
-    assign exe_to_mem_zip = {exe_rf_zip, exe_mem_op, exe_pc, exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn};
+    assign exe_to_mem_zip = {
+            exe_res_from_mem,
+            exe_rf_we,
+            exe_rf_waddr,
+            final_result,
+            exe_mem_op,
+            exe_pc,
+
+            exe_csr_read,
+            exe_csr_we,
+            exe_csr_num,
+            exe_csr_wmask,
+            exe_csr_wvalue,
+
+            exe_to_mem_ex_valid,
+            exe_to_mem_ecode,
+            exe_to_mem_esubcode,
+            exe_to_mem_is_ertn
+    };
 
 endmodule

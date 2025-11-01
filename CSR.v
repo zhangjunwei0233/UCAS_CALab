@@ -187,17 +187,15 @@ module CSR
     reg [31:0]  timer_cnt;
 
 
-    assign csr_rvalue = {32{csr_re}} &
-                        (({32{csr_num == `CSR_CRMD  }} & csr_crmd  ) |
-                         ({32{csr_num == `CSR_PRMD  }} & csr_prmd  ) |
-                         ({32{csr_num == `CSR_ESTAT }} & csr_estat ) |
-                         ({32{csr_num == `CSR_ESTAT }} & csr_estat ) |
-                         ({32{csr_num == `CSR_ERA   }} & csr_era   ) |
-                         ({32{csr_num == `CSR_EENTRY}} & csr_eentry) );
+    assign csr_rvalue = {32{csr_num == `CSR_CRMD  }} & csr_crmd
+                      | {32{csr_num == `CSR_PRMD  }} & csr_prmd
+                      | {32{csr_num == `CSR_ESTAT }} & csr_estat
+                      | {32{csr_num == `CSR_ESTAT }} & csr_estat
+                      | {32{csr_num == `CSR_ERA   }} & csr_era
+                      | {32{csr_num == `CSR_EENTRY}} & csr_eentry;
 
     assign ex_entry = {csr_eentry_va, 6'd0};
     assign era = csr_era;
-    assign has_int = csr_crmd_ie;
+    assign has_int = (|(csr_estat_is & csr_ecfg_lie)) & csr_crmd_ie;
 
 endmodule // CSR
-
