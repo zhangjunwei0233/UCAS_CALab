@@ -7,9 +7,17 @@
     // CSR pipleline fields: {csr_read, csr_we, csr_num[13:0], csr_wmask[31:0], csr_wvalue[31:0]}
     `define CSR_FIELDS_LEN 80
 
-    // ECODE definitions (subset for exp12)
-    `define ECODE_SYS 6'd11
-    `define ESUBCODE_NONE 9'd0
+    // ECODE definitions (for exp13)
+    `define ECODE_INT  6'd0    // Interrupt
+    `define ECODE_ADE  6'd8    // Address Error
+    `define ECODE_ALE  6'd9    // Address aLignment Error  
+    `define ECODE_SYS  6'd11   // System call
+    `define ECODE_BRK  6'd12   // BReaK point
+    `define ECODE_INE  6'd13   // Instruction Not Exist
+
+    // ESUBCODE definitions
+    `define ESUBCODE_NONE  9'd0
+    `define ESUBCODE_ADEF  9'd0    // Address error for instruction fetch
 
     `define IF2ID_LEN (64)    // {inst, pc}
     `define ID2EXE_LEN (158 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., ex_fields}
