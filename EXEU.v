@@ -130,10 +130,20 @@ module EXEU(
     end
 
 
-    // Exception generation (non for now)
-    wire        exe_gen_ex_valid = 1'b0;
-    wire [5:0]  exe_gen_ecode    = 6'd0;
-    wire [8:0]  exe_gen_esubcode = 9'd0;
+    // Exception generation
+    // Address alignment check for memory operations
+    wire is_mem_op = (exe_mem_op != 4'd0);
+    wire is_half_op = (exe_mem_op == 4'd1) | (exe_mem_op == 4'd5) | (exe_mem_op == 4'd9); // ld.h, st.h, ld.hu
+    wire is_word_op = (exe_mem_op == 4'd2) | (exe_mem_op == 4'd6); // ld.w, st.w
+    
+    wire addr_align_error = is_mem_op & (
+                           (is_half_op & exe_alu_result[0]) |        // Half-word must be 2-byte aligned
+                           (is_word_op & (|exe_alu_result[1:0]))     // Word must be 4-byte aligned
+                           );
+    
+    wire        exe_gen_ex_valid = addr_align_error;
+    wire [5:0]  exe_gen_ecode    = addr_align_error ? `ECODE_ALE : 6'd0;
+    wire [8:0]  exe_gen_esubcode = `ESUBCODE_NONE;
 
     wire        exe_to_mem_ex_valid = exe_gen_ex_valid ? 1'b1 : exe_ex_valid;
     wire [5:0]  exe_to_mem_ecode    = exe_gen_ex_valid ? exe_gen_ecode : exe_ecode;
@@ -207,7 +217,7 @@ module EXEU(
     wire addr2 = (exe_alu_result[1:0] == 2'd2);
     wire addr3 = (exe_alu_result[1:0] == 2'd3);
 
-    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok;
+    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok & ~addr_align_error;
     assign data_sram_we    = data_sram_en ? 
                              ( // st.b
                                (exe_mem_op == 4) ?
@@ -267,6 +277,8 @@ module EXEU(
             exe_csr_num,
             exe_csr_wmask,
             exe_csr_wvalue,
+            
+            exe_alu_result,  // vaddr for BADV register
 
             exe_to_mem_ex_valid,
             exe_to_mem_ecode,

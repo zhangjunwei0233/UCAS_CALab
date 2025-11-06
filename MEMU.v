@@ -46,6 +46,7 @@ module MEMU(
     reg  [5:0]  mem_ecode;
     reg  [8:0]  mem_esubcode;
     reg         mem_is_ertn;
+    reg  [31:0] mem_vaddr;      // Virtual address for BADV register
 
     wire [31:0] mem_rf_wdata;
 
@@ -68,6 +69,7 @@ module MEMU(
         if (exe_to_mem_valid & mem_allowin) begin
             {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result, mem_mem_op, mem_pc,
              mem_csr_read, mem_csr_we, mem_csr_num, mem_csr_wmask, mem_csr_wvalue,
+             mem_vaddr,
              mem_ex_valid, mem_ecode, mem_esubcode, mem_is_ertn} <= exe_to_mem_zip;
         end
     end
@@ -143,6 +145,8 @@ module MEMU(
             mem_csr_num,
             mem_csr_wmask,
             mem_csr_wvalue,
+            
+            mem_vaddr,  // vaddr for BADV register
 
             mem_to_wb_ex_valid,
             mem_to_wb_ecode,

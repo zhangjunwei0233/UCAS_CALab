@@ -23,6 +23,7 @@ module WBU(
     // Exception/ERTN info to top
     output wire        wb_ex_valid,
     output wire [31:0] wb_ex_pc,
+    output wire [31:0] wb_vaddr,
     output wire [5:0]  wb_ecode,
     output wire [8:0]  wb_esubcode,
     output wire        wb_is_ertn,
@@ -54,6 +55,7 @@ module WBU(
     reg  [5:0]  wb_ecode_r;
     reg  [8:0]  wb_esubcode_r;
     reg         wb_is_ertn_r;
+    reg  [31:0] wb_vaddr_r;
 
     // Pipeline state control
     assign wb_ready_go = 1'b1;
@@ -84,14 +86,17 @@ module WBU(
             wb_ecode_r    <= 6'd0;
             wb_esubcode_r <= 9'd0;
             wb_is_ertn_r  <= 1'b0;
+            wb_vaddr_r    <= 32'd0;
         end else if (wb_ex_raw) begin
             wb_ex_valid_r <= 1'b0;
             wb_ecode_r    <= 6'd0;
             wb_esubcode_r <= 9'd0;
             wb_is_ertn_r  <= 1'b0;
+            wb_vaddr_r    <= 32'd0;
         end else if (mem_to_wb_valid) begin
             {wb_rf_we, wb_rf_waddr, wb_rf_wdata, wb_pc,
              wb_csr_read, wb_csr_we, wb_csr_num, wb_csr_wmask, wb_csr_wvalue,
+             wb_vaddr_r,
              wb_ex_valid_r, wb_ecode_r, wb_esubcode_r, wb_is_ertn_r} <= mem_to_wb_zip;
         end
     end
@@ -132,6 +137,7 @@ module WBU(
     // Exception/ERTN outputs
     assign wb_ex_valid  = wb_valid & (wb_ex_valid_r | wb_gen_ex_valid);
     assign wb_ex_pc     = wb_pc;
+    assign wb_vaddr     = wb_vaddr_r;
     assign wb_ecode     = wb_gen_ex_valid ? wb_gen_ecode : wb_ecode_r;
     assign wb_esubcode  = wb_gen_ex_valid ? wb_gen_esubcode : wb_esubcode_r;
     assign wb_is_ertn   = wb_valid & wb_is_ertn_r;

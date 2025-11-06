@@ -19,8 +19,8 @@
     `define ESUBCODE_NONE  9'd0
     `define ESUBCODE_ADEF  9'd0    // Address error for instruction fetch
 
-    `define IF2ID_LEN (64)    // {inst, pc}
+    `define IF2ID_LEN (64 + `EX_FIELDS_LEN)    // {inst, pc, ex_fields}
     `define ID2EXE_LEN (158 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., ex_fields}
-    `define EXE2MEM_LEN (75 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., ex_fields}
-    `define MEM2WB_LEN (70 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)   // {..., ex_fields}
+    `define EXE2MEM_LEN (75 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., vaddr, ex_fields}
+    `define MEM2WB_LEN (70 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)   // {..., vaddr, ex_fields}
 `endif

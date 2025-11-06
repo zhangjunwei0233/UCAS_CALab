@@ -18,7 +18,10 @@ module mycpu_top(
     output wire [31:0] debug_wb_pc,
     output wire [ 3:0] debug_wb_rf_we,
     output wire [ 4:0] debug_wb_rf_wnum,
-    output wire [31:0] debug_wb_rf_wdata
+    output wire [31:0] debug_wb_rf_wdata,
+    // interrupt interface
+    input  wire [ 7:0] int_in,
+    input  wire        ipi_int_in
 );
 
     wire        id_allowin;
@@ -68,6 +71,7 @@ module mycpu_top(
     // WBU exception/ertn info
     wire        wb_ex_valid;
     wire [31:0] wb_ex_pc;
+    wire [31:0] wb_vaddr;
     wire [5:0]  wb_ecode;
     wire [8:0]  wb_esubcode;
     wire        wb_is_ertn;
@@ -97,6 +101,7 @@ module mycpu_top(
         .resetn(resetn),
 
         .flush(flush),
+        .has_int(csr_has_int),
 
         .id_allowin(id_allowin),
         .br_taken(br_taken),
@@ -172,6 +177,7 @@ module mycpu_top(
         .wb_ex(wb_ex),
         .wb_ex_valid(wb_ex_valid),
         .wb_ex_pc(wb_ex_pc),
+        .wb_vaddr(wb_vaddr),
         .wb_ecode(wb_ecode),
         .wb_esubcode(wb_esubcode),
         .wb_is_ertn(wb_is_ertn),
@@ -184,7 +190,7 @@ module mycpu_top(
         .csr_rvalue(csr_rvalue)
     );
 
-    // CSR instance (minimal wiring for exp12)
+    // CSR instance (updated for exp13)
     CSR u_csr(
         .clk(clk),
         .resetn(resetn),
@@ -196,15 +202,20 @@ module mycpu_top(
         .csr_wmask(csr_wmask),
         .csr_wvalue(csr_wvalue),
 
-        .hw_int_in(8'd0),
-        .ipi_int_in(1'b0),
+        .hw_int_in(int_in),
+        .ipi_int_in(ipi_int_in),
+        .coreid_in(32'd0), // Core ID, can be customized
 
         .ex_entry(csr_ex_entry),
         .era(csr_era),
         .has_int(csr_has_int),
+        .stable_clk_cntvl(/* not used in exp13 */),
+        .stable_clk_cntvh(/* not used in exp13 */),
+        
         .ertn_flush(wb_is_ertn),
         .wb_ex(wb_ex_valid),
         .wb_pc(wb_ex_pc),
+        .wb_vaddr(wb_vaddr),
         .wb_ecode(wb_ecode),
         .wb_esubcode(wb_esubcode)
     );

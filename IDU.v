@@ -5,6 +5,9 @@ module IDU(
 
     // Global flush from WB (exception/ertn)
     input  wire        flush,
+    
+    // Interrupt interface
+    input  wire        has_int,
 
     // Pipeline interface with IF stage
     output wire        id_allowin,
@@ -30,6 +33,12 @@ module IDU(
     reg         id_valid;
     reg  [31:0] inst;
     reg  [31:0] id_pc;
+    
+    // Exception pipeline fields from IF
+    reg         if_ex_valid;
+    reg  [5:0]  if_ecode;
+    reg  [8:0]  if_esubcode;
+    reg         if_is_ertn;
 
     // ALU control (extended to 19 bits for multiply/divide operations)
     wire [18:0] alu_op;
@@ -111,7 +120,7 @@ module IDU(
     // Pipeline register updates
     always @(posedge clk) begin
         if (if_to_id_valid & id_allowin) begin
-            {inst, id_pc} <= if_to_id_zip;
+            {inst, id_pc, if_ex_valid, if_ecode, if_esubcode, if_is_ertn} <= if_to_id_zip;
         end
     end
 
@@ -248,18 +257,39 @@ module IDU(
     assign alu_op[18] = inst_mod_wu;   // MOD.WU: unsigned modulo
 
     // Privileged and system instructions
-    //   syscall ertn csrrd csrwr csrxchg
+    //   syscall ertn break csrrd csrwr csrxchg
     wire inst_syscall = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[22];
+    wire inst_break   = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[20];
     wire inst_ertn    = op_31_26_d[1] & op_25_22_d[9] & op_21_20_d[0] & op_19_15_d[16] & (rk == 5'h0e) & (~|rj) & (~|rd);
     wire inst_csrrd   = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (rj == 5'b0);
     wire inst_csrwr   = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (rj == 5'b1);
     wire inst_csrxchg = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (|rj[4:1]);
 
-    // Exception generation
-    wire        id_ex_valid   = inst_syscall; // only syscall in exp12
-    wire [5:0]  id_ecode      = inst_syscall ? `ECODE_SYS : 6'd0;
-    wire [8:0]  id_esubcode   = inst_syscall ? `ESUBCODE_NONE : 9'd0;
-    wire        id_is_ertn    = inst_ertn;
+    // Check for known instructions
+    wire inst_known = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu   | inst_nor    | inst_and    | 
+                      inst_or     | inst_xor    | inst_sll_w  | inst_srl_w  | inst_sra_w  | inst_mul_w  |
+                      inst_mulh_w | inst_mulh_wu| inst_div_w  | inst_mod_w  | inst_div_wu | inst_mod_wu |
+                      inst_slli_w | inst_srli_w | inst_srai_w | inst_slti   | inst_sltui  | inst_addi_w |
+                      inst_andi   | inst_ori    | inst_xori   | inst_ld_b   | inst_ld_h   | inst_ld_w   |
+                      inst_ld_bu  | inst_ld_hu  | inst_st_b   | inst_st_h   | inst_st_w   | inst_lu12i_w|
+                      inst_pcaddu12i | inst_jirl | inst_b | inst_bl | inst_beq | inst_bne | inst_blt |
+                      inst_bge    | inst_bltu   | inst_bgeu   | inst_syscall| inst_break  | inst_ertn   |
+                      inst_csrrd  | inst_csrwr  | inst_csrxchg;
+
+    // Exception and interrupt generation  
+    wire id_ex_int     = has_int & id_valid;     // Interrupt exception
+    wire id_ex_syscall = inst_syscall;          // System call exception
+    wire id_ex_break   = inst_break;            // Break point exception
+    wire id_ex_ine     = ~inst_known & id_valid; // Instruction not exist exception
+    
+    wire        id_ex_valid   = if_ex_valid | id_ex_int | id_ex_syscall | id_ex_break | id_ex_ine;
+    wire [5:0]  id_ecode      = if_ex_valid ? if_ecode :
+                                id_ex_int   ? `ECODE_INT :
+                                id_ex_syscall ? `ECODE_SYS :
+                                id_ex_break ? `ECODE_BRK :
+                                id_ex_ine   ? `ECODE_INE : 6'd0;
+    wire [8:0]  id_esubcode   = if_ex_valid ? if_esubcode : `ESUBCODE_NONE;
+    wire        id_is_ertn    = if_is_ertn | inst_ertn;
 
     // Immediate type selection
     assign need_ui5  = ty_S;
@@ -289,7 +319,7 @@ module IDU(
 
     assign res_from_mem = ty_M_LD;
     assign dst_is_r1 = inst_bl;
-    assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_ertn) & id_valid;
+    assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_break | inst_ertn) & id_valid & ~id_ex_valid;
     assign mem_op = {4{ty_M}} & op_25_22;
     assign dest = dst_is_r1 ? 5'd1 : rd;
 
