@@ -46,7 +46,7 @@ module IDU(
     wire        src1_is_pc, src2_is_imm;
 
     // Control signals
-    wire        res_from_mem, dst_is_r1, gr_we;
+    wire        res_from_mem, dst_is_r1, dst_is_rj, gr_we;
     wire [3: 0] mem_op;
     wire        src_reg_is_rd;
     wire [4: 0] dest;
@@ -265,6 +265,12 @@ module IDU(
     wire inst_csrwr   = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (rj == 5'b1);
     wire inst_csrxchg = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (|rj[4:1]);
 
+    // Counter instructions
+    //    rdcntid rdcntvl rdcntvh
+    wire inst_rdcntid = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[0] & op_19_15_d[0] & (rk == 5'h18) & (rd == 5'h00);
+    wire inst_rdcntvl = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[0] & op_19_15_d[0] & (rk == 5'h18) & (rj == 5'h00);
+    wire inst_rdcntvh = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[0] & op_19_15_d[0] & (rk == 5'h19) & (rj == 5'h00);
+
     // Check for known instructions
     wire inst_known = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu   | inst_nor    | inst_and    | 
                       inst_or     | inst_xor    | inst_sll_w  | inst_srl_w  | inst_sra_w  | inst_mul_w  |
@@ -274,7 +280,7 @@ module IDU(
                       inst_ld_bu  | inst_ld_hu  | inst_st_b   | inst_st_h   | inst_st_w   | inst_lu12i_w|
                       inst_pcaddu12i | inst_jirl | inst_b | inst_bl | inst_beq | inst_bne | inst_blt |
                       inst_bge    | inst_bltu   | inst_bgeu   | inst_syscall| inst_break  | inst_ertn   |
-                      inst_csrrd  | inst_csrwr  | inst_csrxchg;
+                      inst_csrrd  | inst_csrwr  | inst_csrxchg | inst_rdcntid | inst_rdcntvl | inst_rdcntvh;
 
     // Exception and interrupt generation  
     wire id_ex_int     = has_int & id_valid;     // Interrupt exception
@@ -319,9 +325,11 @@ module IDU(
 
     assign res_from_mem = ty_M_LD;
     assign dst_is_r1 = inst_bl;
+    assign dst_is_rj = inst_rdcntid;
     assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_break | inst_ertn) & id_valid & ~id_ex_valid;
     assign mem_op = {4{ty_M}} & op_25_22;
-    assign dest = dst_is_r1 ? 5'd1 : rd;
+    assign dest = dst_is_r1 ? 5'd1 :
+                  dst_is_rj ?   rj : rd;
 
     // ALU source selection
     assign alu_src1 = src1_is_pc ? id_pc : rj_value;
@@ -365,11 +373,11 @@ module IDU(
                         conflict_r2_wb  ? wb_rf_wdata : rf_rdata2;
 
     // CSR decode signals
-    wire id_csr_read      = inst_csrrd | inst_csrwr | inst_csrxchg;
+    wire id_csr_read      = inst_csrrd | inst_csrwr | inst_csrxchg | inst_rdcntid;
     wire id_csr_we        = inst_csrwr | inst_csrxchg;
     wire [31:0] id_csr_wmask     = id_csr_we ? (inst_csrxchg ? rj_value : 32'hffff_ffff) : 32'd0;
     wire [31:0] id_csr_wvalue    = id_csr_we ? rkd_value : 32'd0;
-    wire [13:0] id_csr_num  = inst[23:10];
+    wire [13:0] id_csr_num  = inst_rdcntid ? `CSR_TID : inst[23:10];
 
     // Output assignments
     assign id_to_exe_zip = {
@@ -382,6 +390,9 @@ module IDU(
             id_rf_waddr,  // 5
             rkd_value,  // 32
             id_pc,  // 32
+
+            inst_rdcntvl,  // 1
+            inst_rdcntvh,  // 1
 
             id_csr_read, // 1
             id_csr_we,  // 1

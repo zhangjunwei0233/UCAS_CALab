@@ -18,10 +18,7 @@ module mycpu_top(
     output wire [31:0] debug_wb_pc,
     output wire [ 3:0] debug_wb_rf_we,
     output wire [ 4:0] debug_wb_rf_wnum,
-    output wire [31:0] debug_wb_rf_wdata,
-    // interrupt interface
-    input  wire [ 7:0] int_in,
-    input  wire        ipi_int_in
+    output wire [31:0] debug_wb_rf_wdata
 );
 
     wire        id_allowin;
@@ -202,15 +199,13 @@ module mycpu_top(
         .csr_wmask(csr_wmask),
         .csr_wvalue(csr_wvalue),
 
-        .hw_int_in(int_in),
-        .ipi_int_in(ipi_int_in),
+        .hw_int_in(8'd0),
+        .ipi_int_in(1'd0),
         .coreid_in(32'd0), // Core ID, can be customized
 
         .ex_entry(csr_ex_entry),
         .era(csr_era),
         .has_int(csr_has_int),
-        .stable_clk_cntvl(/* not used in exp13 */),
-        .stable_clk_cntvh(/* not used in exp13 */),
         
         .ertn_flush(wb_is_ertn),
         .wb_ex(wb_ex_valid),

@@ -42,6 +42,9 @@ module EXEU(
     reg  [31:0] exe_rkd_value;
     reg         exe_rf_we;
     reg  [ 4:0] exe_rf_waddr;
+    // CNT inst pipeline fields
+    reg         exe_rdcntvl;
+    reg         exe_rdcntvh;
     // CSR pipeline fields
     reg         exe_csr_read;
     reg         exe_csr_we;
@@ -56,6 +59,9 @@ module EXEU(
 
     wire [31:0] exe_alu_result;
     wire [31:0] final_result;
+
+    // 64-bit stable clock counter
+    reg [63:0] stable_clk_counter;
     
     // Multiply/Divide control signals
     wire        mul_busy;
@@ -122,7 +128,9 @@ module EXEU(
     always @(posedge clk) begin
         if (id_to_exe_valid & exe_allowin) begin
             {exe_alu_op, exe_res_from_mem, exe_alu_src1, exe_alu_src2, exe_mem_op, exe_rf_we, exe_rf_waddr,
-             exe_rkd_value, exe_pc, exe_csr_read, exe_csr_we, exe_csr_num, exe_csr_wmask, exe_csr_wvalue,
+             exe_rkd_value, exe_pc,
+             exe_rdcntvl, exe_rdcntvh,
+             exe_csr_read, exe_csr_we, exe_csr_num, exe_csr_wmask, exe_csr_wvalue,
              exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn} <= id_to_exe_zip;
             start_exe <= 1'b1;
         end else
@@ -149,6 +157,15 @@ module EXEU(
     wire [5:0]  exe_to_mem_ecode    = exe_gen_ex_valid ? exe_gen_ecode : exe_ecode;
     wire [8:0]  exe_to_mem_esubcode = exe_gen_ex_valid ? exe_gen_esubcode : exe_esubcode;
     wire        exe_to_mem_is_ertn  = exe_is_ertn;
+
+    // 64-bit stable clock counter for rdcntvl.w and rdcntvh.w instructions
+    always @(posedge clk) begin
+        if (~resetn) begin
+            stable_clk_counter <= 64'd0;
+        end else begin
+            stable_clk_counter <= stable_clk_counter + 1'b1;
+        end
+    end
 
     // ALU instantiation (only handles first 12 bits for regular ALU operations)
     alu u_alu(
@@ -201,15 +218,17 @@ module EXEU(
         .remainder     (div_remainder)
     );
 
-    // Result selection logic for multiply/divide operations
-    assign final_result = exe_alu_op[12] ? mul_product[31:0] :     // MUL.W: low 32 bits
-                          exe_alu_op[13] ? mul_product[63:32] :    // MULH.W: high 32 bits (signed)
-                          exe_alu_op[14] ? mul_product[63:32] :    // MULH.WU: high 32 bits (unsigned)
-                          exe_alu_op[15] ? div_quotient :          // DIV.W: quotient (signed)
-                          exe_alu_op[16] ? div_remainder :         // MOD.W: remainder (signed)
-                          exe_alu_op[17] ? div_quotient :          // DIV.WU: quotient (unsigned)
-                          exe_alu_op[18] ? div_remainder :         // MOD.WU: remainder (unsigned)
-                          exe_alu_result;                          // Regular ALU result
+    // Result selection logic for multiply/divide/cnt operations
+    assign final_result = exe_alu_op[12] ? mul_product[31:0] :         // MUL.W: low 32 bits
+                          exe_alu_op[13] ? mul_product[63:32] :        // MULH.W: high 32 bits (signed)
+                          exe_alu_op[14] ? mul_product[63:32] :        // MULH.WU: high 32 bits (unsigned)
+                          exe_alu_op[15] ? div_quotient :              // DIV.W: quotient (signed)
+                          exe_alu_op[16] ? div_remainder :             // MOD.W: remainder (signed)
+                          exe_alu_op[17] ? div_quotient :              // DIV.WU: quotient (unsigned)
+                          exe_alu_op[18] ? div_remainder :             // MOD.WU: remainder (unsigned)
+                          exe_rdcntvl    ? stable_clk_counter[31: 0] : // RDCNTVL: stable counter low 32 bits
+                          exe_rdcntvh    ? stable_clk_counter[63:32] : // RDCNTVH: stable counter high 32 bits
+                          exe_alu_result;                              // Regular ALU result
 
     // Data SRAM interface
     wire addr0 = (exe_alu_result[1:0] == 2'd0);
@@ -217,7 +236,7 @@ module EXEU(
     wire addr2 = (exe_alu_result[1:0] == 2'd2);
     wire addr3 = (exe_alu_result[1:0] == 2'd3);
 
-    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok & ~addr_align_error;
+    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok;
     assign data_sram_we    = data_sram_en ? 
                              ( // st.b
                                (exe_mem_op == 4) ?

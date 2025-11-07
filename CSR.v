@@ -19,8 +19,6 @@ module CSR
    output wire [31:0] ex_entry,
    output wire [31:0] era,
    output wire        has_int,
-   output wire [31:0] stable_clk_cntvl, // 64-bit stable clock counter low 32 bits
-   output wire [31:0] stable_clk_cntvh, // 64-bit stable clock counter high 32 bits
    input wire         ertn_flush,
    input wire         wb_ex,
    input wire [31:0]  wb_pc,
@@ -29,9 +27,7 @@ module CSR
    input wire [8:0]   wb_esubcode
    );
 
-`define CSR_CRMD        0
-`define CSR_CRMD_PLV    1:0
-`define CSR_CRMD_IE     2
+    // CRMD
     reg [1:0] csr_crmd_plv;
     reg       csr_crmd_ie;
     always @(posedge clk) begin
@@ -61,9 +57,7 @@ module CSR
                 // 31:9           8:7            6:5            4            3            2           1:0
                 {23'd0, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
 
-`define CSR_PRMD        1
-`define CSR_PRMD_PPLV   1:0
-`define CSR_PRMD_PIE    2
+    // PRMD
     reg [1:0] csr_prmd_pplv;
     reg       csr_prmd_pie;
     always @(posedge clk) begin
@@ -82,8 +76,7 @@ module CSR
                 // 31:3            2            1:0
                 {29'd0, csr_prmd_pie, csr_prmd_pplv};
 
-`define CSR_ECFG        4
-`define CSR_ECFG_LIE    12:0
+    // ECFG
     reg [12:0] csr_ecfg_lie;
     always @(posedge clk) begin
         if (~resetn) begin
@@ -97,13 +90,7 @@ module CSR
 
     wire [31:0] csr_ecfg = {19'd0, csr_ecfg_lie};
 
-`define CSR_ESTAT               5
-`define CSR_ESTAT_IS            12:0
-`define CSR_ESTAT_IS10          1:0
-`define CSR_ESTAT_Ecode         21:16
-`define CSR_ESTAT_EsubCode      30:22
-`define CSR_TICLR               68 // 0x44
-`define CSR_TICLR_CLR           0
+    // ESTAT
     reg [12:0] csr_estat_is;
     reg [5:0]  csr_estat_ecode;
     reg [8:0]  csr_estat_esubcode;
@@ -136,8 +123,7 @@ module CSR
                 // 31               30:22            21:16  15:13         12:0
                 {1'd0, csr_estat_esubcode, csr_estat_ecode, 3'd0, csr_estat_is};
 
-`define CSR_ERA         6
-`define CSR_ERA_PC      31:0
+    // ERA
     reg [31:0] csr_era_pc;
     always @(posedge clk) begin
         if (wb_ex) begin
@@ -150,8 +136,7 @@ module CSR
 
     wire [31:0] csr_era = csr_era_pc;
 
-`define CSR_EENTRY      12
-`define CSR_EENTRY_VA   31:6
+    // EENTRY
     reg [25:0] csr_eentry_va;
     always @(posedge clk) begin
         if (csr_we && csr_num == `CSR_EENTRY) begin
@@ -162,8 +147,7 @@ module CSR
 
     wire [31:0] csr_eentry = {csr_eentry_va, 6'd0};
 
-`define CSR_BADV        7
-`define CSR_BADV_VAddr  31:0
+    // BADV
     reg [31:0] csr_badv_vaddr;
     wire wb_ex_addr_err = wb_ecode == `ECODE_ADE || wb_ecode == `ECODE_ALE;
     always @(posedge clk) begin
@@ -174,11 +158,7 @@ module CSR
 
     wire [31:0] csr_badv = csr_badv_vaddr;
 
-`define CSR_SAVE0       48
-`define CSR_SAVE1       49
-`define CSR_SAVE2       50
-`define CSR_SAVE3       51
-`define CSR_SAVE_DATA   31:0
+    // SAVE0~3
     reg [31:0] csr_save0;
     reg [31:0] csr_save1;
     reg [31:0] csr_save2;
@@ -202,8 +182,7 @@ module CSR
         end
     end
 
-`define CSR_TID         64
-`define CSR_TID_TID     31:0
+    // TID
     reg [31:0] csr_tid_tid;
     always @(posedge clk) begin
         if (~resetn) begin
@@ -216,10 +195,7 @@ module CSR
 
     wire [31:0] csr_tid = csr_tid_tid;
 
-`define CSR_TCFG        65
-`define CSR_TCFG_EN     0
-`define CSR_TCFG_PERIOD 1
-`define CSR_TCFG_INITV  31:2
+    // TCFG
     reg        csr_tcfg_en;
     reg        csr_tcfg_periodic;
     reg [29:0] csr_tcfg_initval;
@@ -241,8 +217,7 @@ module CSR
 
     wire [31:0] csr_tcfg = {csr_tcfg_initval, csr_tcfg_periodic, csr_tcfg_en};
 
-`define CSR_TVAL        66
-`define CSR_TVAL_VAL    31:0
+    // TVAL
     wire [31:0] tcfg_next_value;
     reg  [31:0] timer_cnt;
 
@@ -268,19 +243,6 @@ module CSR
     // TICLR - "W1"
     wire csr_ticlr_clr = 1'b0;
     wire [31:0] csr_ticlr = {31'd0, csr_ticlr_clr};
-
-    // 64-bit stable clock counter for rdcntvl.w and rdcntvh.w instructions
-    reg [63:0] stable_clk_counter;
-    always @(posedge clk) begin
-        if (~resetn) begin
-            stable_clk_counter <= 64'd0;
-        end else begin
-            stable_clk_counter <= stable_clk_counter + 1'b1;
-        end
-    end
-
-    assign stable_clk_cntvl = stable_clk_counter[31:0];
-    assign stable_clk_cntvh = stable_clk_counter[63:32];
 
 
     assign csr_rvalue = {32{csr_num == `CSR_CRMD  }} & csr_crmd
