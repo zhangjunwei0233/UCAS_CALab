@@ -1,0 +1,220 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper]{geometry}
+\geometry{left=2.0cm,right=2.0cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{ctex} % 支持中文的LaTeX宏包
+\usepackage{amsmath,amsfonts,graphicx,amssymb,bm,amsthm,mathrsfs,mathtools,breqn} % 数学公式和符号的宏包集合
+\usepackage{algorithm,algorithmicx} % 算法和伪代码
+\usepackage[noend]{algpseudocode} % 算法和伪代码
+\usepackage{fancyhdr} % 自定义页眉页脚
+\usepackage[framemethod=TikZ]{mdframed} % 创建带边框的框架
+\usepackage{fontspec} % 字体设置
+\usepackage{adjustbox} % 调整盒子大小
+\usepackage{fontsize} % 设置字体大小
+\usepackage{tikz,xcolor} % 绘制图形和使用颜色
+\usepackage{multicol} % 多栏排版
+\usepackage{multirow} % 表格中合并单元格
+\usepackage{pdfpages} % 插入PDF文件
+\usepackage{listings} % 在文档中插入源代码
+\usepackage{wrapfig} % 文字绕排图片
+\usepackage{bigstrut,multirow,rotating} % 支持在表格中使用特殊命令
+\usepackage{booktabs} % 创建美观的表格
+\usepackage{circuitikz} % 绘制电路图
+\usepackage{zhnumber} % 中文序号（用于标题）
+\usepackage{tabularx} % 表格折行
+\usepackage{float} % 图片插入
+\usepackage{longtable} % 长表格
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+\lstset{
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=fixed,
+  framerule=1pt,
+  rulecolor=\color{gray!35},
+  backgroundcolor=\color{gray!5},
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+}
+
+% 轻松引用, 可以用\cref{}指令直接引用, 自动加前缀. 
+% 例: 图片label为fig:1
+% \cref{fig:1} => Figure.1
+% \ref{fig:1}  => 1
+\usepackage[capitalize]{cleveref}
+% \crefname{section}{Sec.}{Secs.}
+\Crefname{section}{Section}{Sections}
+\Crefname{table}{Table}{Tables}
+\crefname{table}{Table.}{Tabs.}
+
+% \setmainfont{Palatino Linotype.ttf}
+% \setCJKmainfont{SimHei.ttf}
+% \setCJKsansfont{Songti.ttf}
+% \setCJKmonofont{SimSun.ttf}
+\punctstyle{kaiming}
+% 偏好的几个字体, 可以根据需要自行加入字体ttf文件并调用
+
+\renewcommand{\emph}[1]{\begin{kaishu}#1\end{kaishu}}
+
+% 对 section 等环境的序号使用中文
+\renewcommand \thesection{\zhnum{section}、}
+\renewcommand \thesubsection{\arabic{subsection}}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%改这里可以修改实验报告表头的信息
+\newcommand{\name}{陈琛、王荦璠、张钧玮}
+\newcommand{\studentNum}{80}
+\newcommand{\major}{计算机科学与技术}
+\newcommand{\labNum}{4}
+\newcommand{\labName}{异常与中断设计专题}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\begin{center}
+  \LARGE \bf 中国科学院大学 \\《计算机体系结构（研讨课）》实验报告
+\end{center}
+
+\begin{center}
+  \emph{姓名} \underline{\makebox[12em][c]{\name}} 
+  \emph{箱子号} \underline{\makebox[7em][c]{\studentNum}}
+  \emph{专业} \underline{\makebox[15em][c]{\major}}\\
+  \emph{实验项目编号} \underline{\makebox[3em][c]{\labNum}}
+  \emph{实验名称} \underline{\makebox[30em][c]{\labName}}\\
+\end{center}
+
+\section{实验任务}
+
+本次实验的目标是在已有的流水线CPU基础上，添加特权态指令中的异常和中断功能。具体需要实现：
+
+\begin{itemize}
+\item CSR模块，包括CRMD、PRMD、ESTAT、ERA、EENTRY、SAVE0~3、ECFG、BADV、TID、TCFG、TVAL和TICLR共15个状态寄存器；
+\item 实现syscall和ertn指令，支持系统调用异常；
+\item 实现地址错（ADEF）、地址非对齐（ALE）、断点（BRK）和指令不存在（INE）异常，以及外部线中断；
+\item 实现csrrd、csrwr、csrxchg、rdcntvl.w、rdcntvh.w和rdcntid指令以访问状态寄存器。
+\end{itemize}
+
+\section{设计详细分析}
+
+\subsection{总体设计思路}
+
+在本次实验中，我们采用了分层次的设计方法，将特权态指令的实现分为三个关键部分。首先，新增独立的CSR模块，实现15个状态寄存器的硬件存储与访问逻辑。为保证精确异常，所有CSR写操作被推迟到WB级统一处理，并通过阻塞机制解决数据冲突。其次，在异常处理层面，需要扩展流水线控制逻辑以支持四种异常类型（ADEF/ALE/BRK/INE）和外部中断，通过ESTAT寄存器记录异常原因，由BADV寄存器保存错误地址。最后，在指令层面，需要修改译码模块，添加syscall、ertn和CSR访问指令（csrrd/csrwr/csrxchg/rdcntvl.w/rdcntvh.w/rdcntid）。
+
+\subsection{处理器结构设计框图}
+
+% \begin{figure}[H]
+%   \centering
+%   \includegraphics[width=\textwidth]{fig/CPU_arch_prj4.png}
+%   \caption{处理器结构设计框图}
+%   \label{fig:processor_structure}
+% \end{figure}
+
+\subsection{关键设计模块}
+
+\subsubsection{CSR模块实现}
+
+本次实验中按照讲义推荐的方式实现CSR模块，即将所有CSR集中到同一个模块中实现，除了提供统一的读写端口外，独立定义与硬件电路交互的信号接口。根据以上设计理念，CSR模块的接口定义如下：
+
+\begin{lstlisting}[language=Verilog]
+module CSR
+  (
+   input wire         clk,
+   input wire         resetn,
+
+   // 统一的CSR读写端口
+   input wire         csr_re,
+   input wire [13:0]  csr_num,
+   output wire [31:0] csr_rvalue,
+   input wire         csr_we,
+   input wire [31:0]  csr_wmask,
+   input wire [31:0]  csr_wvalue,
+
+   // 硬件交互端口
+   input wire [7:0]   hw_int_in,   // 硬中断输入
+   input wire         ipi_int_in,  // 核间中断输入
+   input wire [31:0]  coreid_in,   // 核心编号
+   output wire [31:0] ex_entry,    // 送往IF级的异常处理入口
+   output wire [31:0] era,         // 送往IF级的异常返回地址
+   output wire        has_int,     // 送往ID级的中断有效信号
+   // 来自写回级的异常处理信号
+   input wire         ertn_flush,
+   input wire         wb_ex,
+   input wire [31:0]  wb_pc,
+   input wire [31:0]  wb_vaddr,
+   input wire [5:0]   wb_ecode,
+   input wire [8:0]   wb_esubcode
+   );
+\end{lstlisting}
+
+接下来，我们以CRMD寄存器为例，说明CSR的基本实现方式。对于CRMD寄存器而言，PLV域和IE域可以被软件指令更新，同时也会在异常产生和返回时更新；DA、PG、DATF、DATM域暂时实现为固定值。具体实现的Verilog代码如下：
+
+\begin{lstlisting}[language=Verilog]
+// CRMD
+reg [1:0] csr_crmd_plv;
+reg       csr_crmd_ie;
+always @(posedge clk) begin
+    if (~resetn) begin
+        csr_crmd_plv <= 2'b0;
+        csr_crmd_ie  <= 1'b0;
+    end else if (wb_ex) begin
+        // 异常发生
+        csr_crmd_plv <= 2'b0;
+        csr_crmd_ie  <= 1'b0;
+    end else if (ertn_flush) begin
+        // 异常返回
+        csr_crmd_plv <= csr_prmd_pplv;
+        csr_crmd_ie  <= csr_prmd_pie;
+    end else if (csr_we && csr_num == `CSR_CRMD) begin
+        // 软件修改
+        csr_crmd_plv <= ( csr_wmask[`CSR_CRMD_PLV] & csr_wvalue[`CSR_CRMD_PLV]) |
+                        (~csr_wmask[`CSR_CRMD_PLV] & csr_crmd_plv);
+        csr_crmd_ie  <= ( csr_wmask[`CSR_CRMD_IE]  & csr_wvalue[`CSR_CRMD_IE] ) |
+                        (~csr_wmask[`CSR_CRMD_IE]  & csr_crmd_ie );
+    end
+end
+
+wire       csr_crmd_da   = 1'b1;
+wire       csr_crmd_pg   = 1'b0;
+wire [1:0] csr_crmd_datf = 2'b0;
+wire [1:0] csr_crmd_datm = 2'b0;
+
+wire [31:0] csr_crmd =
+            // 31:9           8:7            6:5            4            3            2           1:0
+            {23'd0, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
+\end{lstlisting}
+
+其他CSR的实现与CRMD大同小异，此处不再赘述。
+
+\subsubsection{其他设计模块}
+
+\section{实验过程中遇到的问题}
+
+\subsection{异常发生后的多周期指令处理问题}
+
+在syscall进入WB级进行异常处理时，后续的2条指令可能分别都进入了EXE级和MEM级。特别地，如果这两条指令中存在多周期指令（如mul, div, 访存等），可能已经开始执行。此时如果需要冲刷，不能简单地拉低valid（否则多周期状态机可能已经开始执行，状态机执行完成后输出错误结果）。因此，需要通过异常前递信号判断先前的指令是否已经产生了异常。若已经产生，则不执行后续的多周期指令。
+
+\section{实验结果}
+
+所有测试均通过验证，证明了我们实现的CPU能够正确支持异常和中断处理。
+
+\section{小组成员分工}
+
+陈琛：实现了CSR模块。
+
+张钧玮：
+
+王荦璠：
+
+\end{document}
