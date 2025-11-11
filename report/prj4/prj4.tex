@@ -114,12 +114,12 @@
 
 \subsection{处理器结构设计框图}
 
-% \begin{figure}[H]
-%   \centering
-%   \includegraphics[width=\textwidth]{fig/CPU_arch_prj4.png}
-%   \caption{处理器结构设计框图}
-%   \label{fig:processor_structure}
-% \end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/CPU_arch_prj4.jpg}
+  \caption{处理器结构设计框图}
+  \label{fig:processor_structure}
+\end{figure}
 
 \subsection{关键设计模块}
 
@@ -327,11 +327,89 @@ assign wb_is_ertn = wb_valid & wb_is_ertn_r;
 
 这些信号连接到CSR模块，触发异常处理流程。同时，\texttt{wb\_ex\_valid}或\texttt{wb\_is\_ertn}信号会生成全局冲刷，确保异常指令之后的所有指令被取消执行，实现精确异常。
 
+\subsubsection{CSR读写指令的实现}
+
+\paragraph{CSR读写信息的流水线传递}
+
+为方便起见，当前阶段统一在WB阶段读写CSR寄存器。CSR读写指令在ID阶段被解码，产生如下的流水线信号并随流水线传递至WB阶段，由WB统一执行读写。
+
+\begin{lstlisting}[language=Verilog]
+// CSR pipleline fields: {csr_read, csr_we, csr_num[13:0], csr_wmask[31:0], csr_wvalue[31:0]}
+`define CSR_FIELDS_LEN 80
+\end{lstlisting}
+
+\paragraph{阻塞解决CSR指令引发的数据相关}
+
+CSR指令有可能引发数据相关。比如前一条指令将CSR中的值保存进寄存器1，而后一条指令以寄存器1为源操作数，在后一条指令进入ID阶段解码的时候，前一条指令还没有进入WB阶段读取CSR寄存器，由此触发数据相关。
+
+由于CSR读写指令的密度稀少，针对此进行优化的收益低，故简单起见，本实验中采用阻塞解决。在ID阶段后的各个阶段前递给ID的数据中，设置 res\_from\_exe, res\_from\_mem, res\_from\_wb信号，之后ID阶段负责识别这些信号，使当前级陷入阻塞，从而阻塞整条流水线，避免数据相关。ID阶段的代码如下：
+
+\begin{lstlisting}[language=Verilog]
+assign id_stall = ((exe_res_from_mem | exe_from_csr) & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2)))
+|
+     ((mem_res_from_mem | mem_from_csr) & ((conflict_r1_mem & need_r1) | (conflict_r2_mem & need_r2))) |
+      ((wb_from_csr)                     & ((conflict_r1_wb  & need_r1) | (conflict_r2_wb  & need_r2)));
+\end{lstlisting}
+
 \section{实验过程中遇到的问题}
+
+\subsection{异常信号的前递问题}
+
+在EXE级需要向内存发送读写请求，此时若在EXE级之后的指令若产生异常，则当前EXE级中的指令应该被冲刷掉，因此请求不应该被发出。由于在当前的CPU当中，在MEM与WB阶段不额外产生新的异常，故可以通过将MEM与WB阶段的异常信号前递，在EXE级别统一判断是否接发送请求。原设计中缺少这一部分，导致报错。修复后，MEM与WB级前递的信号为 mem\_ex与 wb\_ex，之后由如下逻辑判断是否可以正常发送请求：
+
+\begin{lstlisting}[language=Verilog]
+wire exe_multicycle_ok = exe_valid & ~(mem_ex | wb_ex | exe_to_mem_ex_valid | exe_to_mem_is_ertn);
+
+assign data_sram_en = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok;
+\end{lstlisting}
 
 \subsection{异常发生后的多周期指令处理问题}
 
 在syscall进入WB级进行异常处理时，后续的2条指令可能分别都进入了EXE级和MEM级。特别地，如果这两条指令中存在多周期指令（如mul, div, 访存等），可能已经开始执行。此时如果需要冲刷，不能简单地拉低valid（否则多周期状态机可能已经开始执行，状态机执行完成后输出错误结果）。因此，需要通过异常前递信号判断先前的指令是否已经产生了异常。若已经产生，则不执行后续的多周期指令。
+
+\subsection{先前遗留的译码逻辑问题}
+
+在原先的实现中，由于分支指令在ID阶段有单独的比较器，所以没有解码产生相应的alu\_op，导致基于alu\_op信号的need\_r1信号出现问题，进而导致ID阶段的stall逻辑在一些分支指令上没有正确触发，如下图pc=1c00800c所示是beq指令，它的need\_r1信号为0
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decode_logic_problem_demo.jpg}
+  \caption{译码逻辑问题示例图}
+  \label{fig:processor_structure}
+\end{figure}
+
+在ID阶段完善 alu\_op 信号的译码，即可修复问题：
+
+\begin{lstlisting}[language=Verilog]
+    // ALU operation encoding (extended to 18 bits for multiply/divide)
+    assign alu_op[0]  = inst_add_w | inst_addi_w | ty_M |
+                        inst_jirl  | inst_bl     | inst_pcaddu12i;
+    assign alu_op[1]  = inst_sub_w | inst_bne    | inst_beq;
+    assign alu_op[2]  = inst_slt   | inst_slti   | inst_blt    | inst_bge;
+    assign alu_op[3]  = inst_sltu  | inst_sltui  | inst_bltu   | inst_bgeu;
+    assign alu_op[4]  = inst_and   | inst_andi;
+    assign alu_op[5]  = inst_nor;
+    assign alu_op[6]  = inst_or    | inst_ori;
+    assign alu_op[7]  = inst_xor   | inst_xori;
+    assign alu_op[8]  = inst_sll_w | inst_slli_w;
+    assign alu_op[9]  = inst_srl_w | inst_srli_w;
+    assign alu_op[10] = inst_sra_w | inst_srai_w;
+    assign alu_op[11] = inst_lu12i_w;
+\end{lstlisting}
+
+
+\subsection{ESTAT寄存器高阻态问题}
+
+在编写完实验13的代码，运行仿真测试时，发现ESTAT信号初始化为高阻态：
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/estat_problem_demo.jpg}
+  \caption{ESTAT初始化问题示例图}
+  \label{fig:processor_structure}
+\end{figure}
+
+观察发现其中第12与2~9位为高阻态，对应hw\_init\_in与ipi\_init\_in。原因是这两个信号一路被拉到了顶层封装my\_cputop的接口，超出了最高层实例化的范围。将其在my\_cputop中手动设置为0即可。
 
 \section{实验结果}
 
@@ -339,9 +417,9 @@ assign wb_is_ertn = wb_valid & wb_is_ertn_r;
 
 \section{小组成员分工}
 
-陈琛：实现了CSR模块。
+陈琛：实现了CSR模块。修复EXE多周期指令问题。
 
-张钧玮：
+张钧玮：负责CSR指令与计时器指令的实现，添加异常信号前递机制。
 
 王荦璠：负责异常和中断的流水线实现。实现了syscall和ertn指令，设计了异常信息在流水线中的传递机制。
 
