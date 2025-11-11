@@ -3,6 +3,9 @@ module MEMU(
     input  wire        clk,
     input  wire        resetn,
 
+    // Global flush from WB (exception/ertn)
+    input  wire        flush,
+
     // Pipeline interface with EXE stage
     output wire        mem_allowin,
     input  wire        exe_to_mem_valid,
@@ -17,7 +20,10 @@ module MEMU(
     input  wire [31:0] data_sram_rdata,
 
     // Data forwarding to ID stage
-    output wire [38:0] mem_rf_zip
+    output wire [39:0] mem_rf_zip,
+
+    // Exception signal forwarding to EXE stage
+    output wire        mem_ex
 );
     // Pipeline control
     wire        mem_ready_go;
@@ -29,6 +35,18 @@ module MEMU(
     reg  [3 :0] mem_mem_op;
     reg  [4 :0] mem_rf_waddr;
     reg  [31:0] mem_alu_result;
+    // CSR pipeline fields
+    reg         mem_csr_read;
+    reg         mem_csr_we;
+    reg  [13:0] mem_csr_num;
+    reg  [31:0] mem_csr_wmask;
+    reg  [31:0] mem_csr_wvalue;
+    // Exception pipeline fields
+    reg         mem_ex_valid;
+    reg  [5:0]  mem_ecode;
+    reg  [8:0]  mem_esubcode;
+    reg         mem_is_ertn;
+    reg  [31:0] mem_vaddr;      // Virtual address for BADV register
 
     wire [31:0] mem_rf_wdata;
 
@@ -40,6 +58,8 @@ module MEMU(
     always @(posedge clk) begin
         if (~resetn)
             mem_valid <= 1'b0;
+        else if (flush)
+            mem_valid <= 1'b0;
         else
             mem_valid <= exe_to_mem_valid & mem_allowin;
     end
@@ -47,9 +67,25 @@ module MEMU(
     // Pipeline register updates
     always @(posedge clk) begin
         if (exe_to_mem_valid & mem_allowin) begin
-            {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result, mem_mem_op, mem_pc} <= exe_to_mem_zip;
+            {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result, mem_mem_op, mem_pc,
+             mem_csr_read, mem_csr_we, mem_csr_num, mem_csr_wmask, mem_csr_wvalue,
+             mem_vaddr,
+             mem_ex_valid, mem_ecode, mem_esubcode, mem_is_ertn} <= exe_to_mem_zip;
         end
     end
+
+    // Exception generation (non for now)
+    wire        mem_gen_ex_valid = 1'b0;
+    wire [5:0]  mem_gen_ecode    = 6'd0;
+    wire [8:0]  mem_gen_esubcode = 9'd0;
+
+    wire        mem_to_wb_ex_valid = mem_gen_ex_valid ? 1'b1 : mem_ex_valid;
+    wire [5:0]  mem_to_wb_ecode    = mem_gen_ex_valid ? mem_gen_ecode : mem_ecode;
+    wire [8:0]  mem_to_wb_esubcode = mem_gen_ex_valid ? mem_gen_esubcode : mem_esubcode;
+    wire        mem_to_wb_is_ertn  = mem_is_ertn;
+
+    // Exception forwarding to EXE stage
+    assign mem_ex = mem_valid & (mem_to_wb_ex_valid | mem_to_wb_is_ertn);
 
     // Output assignment
     wire addr0 = (mem_alu_result[1:0] == 2'd0);
@@ -89,9 +125,33 @@ module MEMU(
     assign mem_rf_wdata = mem_res_from_mem ? mem_data : mem_alu_result;
 
     // Data forwarding
-    assign mem_rf_zip = {mem_res_from_mem, mem_valid & mem_rf_we, mem_rf_waddr, mem_alu_result};
+    assign mem_rf_zip = {
+            mem_valid & mem_csr_read,
+            mem_valid & mem_res_from_mem,
+            mem_valid & mem_rf_we,
+            mem_rf_waddr,
+            mem_alu_result
+    };
 
     // Pipeline output to WB stage
-    assign mem_to_wb_zip = {mem_rf_we, mem_rf_waddr, mem_rf_wdata, mem_pc};
+    assign mem_to_wb_zip = {
+            mem_rf_we,
+            mem_rf_waddr,
+            mem_rf_wdata,
+            mem_pc,
+
+            mem_csr_read,
+            mem_csr_we,
+            mem_csr_num,
+            mem_csr_wmask,
+            mem_csr_wvalue,
+            
+            mem_vaddr,  // vaddr for BADV register
+
+            mem_to_wb_ex_valid,
+            mem_to_wb_ecode,
+            mem_to_wb_esubcode,
+            mem_to_wb_is_ertn
+    };
 
 endmodule

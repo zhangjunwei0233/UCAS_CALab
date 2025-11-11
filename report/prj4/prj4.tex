@@ -1,0 +1,429 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper]{geometry}
+\geometry{left=2.0cm,right=2.0cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{ctex} % 支持中文的LaTeX宏包
+\usepackage{amsmath,amsfonts,graphicx,amssymb,bm,amsthm,mathrsfs,mathtools,breqn} % 数学公式和符号的宏包集合
+\usepackage{algorithm,algorithmicx} % 算法和伪代码
+\usepackage[noend]{algpseudocode} % 算法和伪代码
+\usepackage{fancyhdr} % 自定义页眉页脚
+\usepackage[framemethod=TikZ]{mdframed} % 创建带边框的框架
+\usepackage{fontspec} % 字体设置
+\usepackage{adjustbox} % 调整盒子大小
+\usepackage{fontsize} % 设置字体大小
+\usepackage{tikz,xcolor} % 绘制图形和使用颜色
+\usepackage{multicol} % 多栏排版
+\usepackage{multirow} % 表格中合并单元格
+\usepackage{pdfpages} % 插入PDF文件
+\usepackage{listings} % 在文档中插入源代码
+\usepackage{wrapfig} % 文字绕排图片
+\usepackage{bigstrut,multirow,rotating} % 支持在表格中使用特殊命令
+\usepackage{booktabs} % 创建美观的表格
+\usepackage{circuitikz} % 绘制电路图
+\usepackage{zhnumber} % 中文序号（用于标题）
+\usepackage{tabularx} % 表格折行
+\usepackage{float} % 图片插入
+\usepackage{longtable} % 长表格
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+\lstset{
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=fixed,
+  framerule=1pt,
+  rulecolor=\color{gray!35},
+  backgroundcolor=\color{gray!5},
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+}
+
+% 轻松引用, 可以用\cref{}指令直接引用, 自动加前缀. 
+% 例: 图片label为fig:1
+% \cref{fig:1} => Figure.1
+% \ref{fig:1}  => 1
+\usepackage[capitalize]{cleveref}
+% \crefname{section}{Sec.}{Secs.}
+\Crefname{section}{Section}{Sections}
+\Crefname{table}{Table}{Tables}
+\crefname{table}{Table.}{Tabs.}
+
+% \setmainfont{Palatino Linotype.ttf}
+% \setCJKmainfont{SimHei.ttf}
+% \setCJKsansfont{Songti.ttf}
+% \setCJKmonofont{SimSun.ttf}
+\punctstyle{kaiming}
+% 偏好的几个字体, 可以根据需要自行加入字体ttf文件并调用
+
+\renewcommand{\emph}[1]{\begin{kaishu}#1\end{kaishu}}
+
+% 对 section 等环境的序号使用中文
+\renewcommand \thesection{\zhnum{section}、}
+\renewcommand \thesubsection{\arabic{subsection}}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%改这里可以修改实验报告表头的信息
+\newcommand{\name}{陈琛、王荦璠、张钧玮}
+\newcommand{\studentNum}{80}
+\newcommand{\major}{计算机科学与技术}
+\newcommand{\labNum}{4}
+\newcommand{\labName}{异常与中断设计专题}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\begin{center}
+  \LARGE \bf 中国科学院大学 \\《计算机体系结构（研讨课）》实验报告
+\end{center}
+
+\begin{center}
+  \emph{姓名} \underline{\makebox[12em][c]{\name}} 
+  \emph{箱子号} \underline{\makebox[7em][c]{\studentNum}}
+  \emph{专业} \underline{\makebox[15em][c]{\major}}\\
+  \emph{实验项目编号} \underline{\makebox[3em][c]{\labNum}}
+  \emph{实验名称} \underline{\makebox[30em][c]{\labName}}\\
+\end{center}
+
+\section{实验任务}
+
+本次实验的目标是在已有的流水线CPU基础上，添加特权态指令中的异常和中断功能。具体需要实现：
+
+\begin{itemize}
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+\setlength{\parskip}{0pt}
+\item CSR模块，包括CRMD、PRMD、ESTAT、ERA、EENTRY、SAVE0~3、ECFG、BADV、TID、TCFG、TVAL和TICLR共15个状态寄存器；
+\item 实现syscall和ertn指令，支持系统调用异常；
+\item 实现地址错（ADEF）、地址非对齐（ALE）、断点（BRK）和指令不存在（INE）异常，以及外部线中断；
+\item 实现csrrd、csrwr、csrxchg、rdcntvl.w、rdcntvh.w和rdcntid指令以访问状态寄存器。
+\end{itemize}
+
+\section{设计详细分析}
+
+\subsection{总体设计思路}
+
+在本次实验中，我们采用了分层次的设计方法，将特权态指令的实现分为三个关键部分。首先，新增独立的CSR模块，实现15个状态寄存器的硬件存储与访问逻辑。为保证精确异常，所有CSR写操作被推迟到WB级统一处理，并通过阻塞机制解决数据冲突。其次，在异常处理层面，需要扩展流水线控制逻辑以支持四种异常类型（ADEF/ALE/BRK/INE）和外部中断，通过ESTAT寄存器记录异常原因，由BADV寄存器保存错误地址。最后，在指令层面，需要修改译码模块，添加syscall、ertn和CSR访问指令（csrrd/csrwr/csrxchg/rdcntvl.w/rdcntvh.w/rdcntid）。
+
+\subsection{处理器结构设计框图}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/CPU_arch_prj4.jpg}
+  \caption{处理器结构设计框图}
+  \label{fig:processor_structure}
+\end{figure}
+
+\subsection{关键设计模块}
+
+\subsubsection{CSR模块实现}
+
+本次实验中按照讲义推荐的方式实现CSR模块，即将所有CSR集中到同一个模块中实现，除了提供统一的读写端口外，独立定义与硬件电路交互的信号接口。根据以上设计理念，CSR模块的接口定义如下：
+
+\begin{lstlisting}[language=Verilog]
+module CSR
+  (
+   input wire         clk,
+   input wire         resetn,
+
+   // 统一的CSR读写端口
+   input wire         csr_re,
+   input wire [13:0]  csr_num,
+   output wire [31:0] csr_rvalue,
+   input wire         csr_we,
+   input wire [31:0]  csr_wmask,
+   input wire [31:0]  csr_wvalue,
+
+   // 硬件交互端口
+   input wire [7:0]   hw_int_in,   // 硬中断输入
+   input wire         ipi_int_in,  // 核间中断输入
+   input wire [31:0]  coreid_in,   // 核心编号
+   output wire [31:0] ex_entry,    // 送往IF级的异常处理入口
+   output wire [31:0] era,         // 送往IF级的异常返回地址
+   output wire        has_int,     // 送往ID级的中断有效信号
+   // 来自写回级的异常处理信号
+   input wire         ertn_flush,
+   input wire         wb_ex,
+   input wire [31:0]  wb_pc,
+   input wire [31:0]  wb_vaddr,
+   input wire [5:0]   wb_ecode,
+   input wire [8:0]   wb_esubcode
+   );
+\end{lstlisting}
+
+接下来，我们以CRMD寄存器为例，说明CSR的基本实现方式。对于CRMD寄存器而言，PLV域和IE域可以被软件指令更新，同时也会在异常产生和返回时更新；DA、PG、DATF、DATM域暂时实现为固定值。具体实现的Verilog代码如下：
+
+\begin{lstlisting}[language=Verilog]
+// CRMD
+reg [1:0] csr_crmd_plv;
+reg       csr_crmd_ie;
+always @(posedge clk) begin
+    if (~resetn) begin
+        csr_crmd_plv <= 2'b0;
+        csr_crmd_ie  <= 1'b0;
+    end else if (wb_ex) begin
+        // 异常发生
+        csr_crmd_plv <= 2'b0;
+        csr_crmd_ie  <= 1'b0;
+    end else if (ertn_flush) begin
+        // 异常返回
+        csr_crmd_plv <= csr_prmd_pplv;
+        csr_crmd_ie  <= csr_prmd_pie;
+    end else if (csr_we && csr_num == `CSR_CRMD) begin
+        // 软件修改
+        csr_crmd_plv <= ( csr_wmask[`CSR_CRMD_PLV] & csr_wvalue[`CSR_CRMD_PLV]) |
+                        (~csr_wmask[`CSR_CRMD_PLV] & csr_crmd_plv);
+        csr_crmd_ie  <= ( csr_wmask[`CSR_CRMD_IE]  & csr_wvalue[`CSR_CRMD_IE] ) |
+                        (~csr_wmask[`CSR_CRMD_IE]  & csr_crmd_ie );
+    end
+end
+
+wire       csr_crmd_da   = 1'b1;
+wire       csr_crmd_pg   = 1'b0;
+wire [1:0] csr_crmd_datf = 2'b0;
+wire [1:0] csr_crmd_datm = 2'b0;
+
+wire [31:0] csr_crmd =
+            // 31:9           8:7            6:5            4            3            2           1:0
+            {23'd0, csr_crmd_datm, csr_crmd_datf, csr_crmd_pg, csr_crmd_da, csr_crmd_ie, csr_crmd_plv};
+\end{lstlisting}
+
+其他CSR的实现与CRMD大同小异，此处不再赘述。
+
+\subsubsection{异常与中断的流水线实现}
+
+为了支持精确异常，我们采用了分布式异常检测和集中式异常处理的设计思路。异常检测逻辑分布在各流水级中，异常信息随着指令在流水线中传递，最终在写回级统一处理。
+
+\paragraph{异常信息的流水线传递}
+
+我们在流水线各级之间扩展了异常传递字段，包含异常有效位、异常编码、异常子编码和异常返回标志。在macros.h中定义如下：
+
+\begin{lstlisting}[language=Verilog]
+// Exception/ERTN pipeline fields: {ex_valid, ecode[5:0], esubcode[8:0], is_ertn}
+`define EX_FIELDS_LEN 17
+
+// Exception codes
+`define ECODE_INT  6'd0    // Interrupt
+`define ECODE_ADE  6'd8    // Address Error
+`define ECODE_ALE  6'd9    // Address Alignment Error  
+`define ECODE_SYS  6'd11   // System call
+`define ECODE_BRK  6'd12   // Breakpoint
+`define ECODE_INE  6'd13   // Instruction Not Exist
+
+`define ESUBCODE_ADEF  9'd0  // Address error for instruction fetch
+\end{lstlisting}
+
+这些异常字段被添加到各级流水线寄存器中，从IF级开始逐级传递至WB级，确保异常信息与触发异常的指令保持同步。
+
+\paragraph{取指地址错异常（ADEF）检测}
+
+取指地址错异常在IFU模块中检测。根据LoongArch规范，指令PC必须4字节对齐。我们在取指级检测PC的最低两位，若不为00则产生ADEF异常：
+
+\begin{lstlisting}[language=Verilog]
+// Exception detection: ADEF - Address error for instruction fetch
+// PC must be word-aligned (lowest 2 bits must be 00)
+assign if_ex_adef = (if_pc[1:0] != 2'b00);
+assign if_ex_valid = if_ex_adef;
+assign if_ecode = if_ex_adef ? `ECODE_ADE : 6'd0;
+assign if_esubcode = if_ex_adef ? `ESUBCODE_ADEF : 9'd0;
+
+// Pack exception fields into pipeline register
+wire [`EX_FIELDS_LEN-1:0] if_ex_fields = 
+    {if_ex_valid, if_ecode, if_esubcode, if_is_ertn};
+\end{lstlisting}
+
+该异常信息随取指的指令和PC一起打包，通过\texttt{if\_to\_id\_zip}传递到译码级。
+
+\paragraph{断点异常（BRK）、指令不存在异常（INE）和中断的检测}
+
+这三类异常在IDU模块的译码级进行检测。对于断点异常，我们通过指令译码识别\texttt{break}指令；对于指令不存在异常，我们维护了一个\texttt{inst\_known}信号，通过对所有已实现指令的OR运算来判断当前指令是否已实现；对于中断，我们从CSR模块接收\texttt{has\_int}信号并在ID级标记到指令上。
+
+\begin{lstlisting}[language=Verilog]
+// Instruction decode
+wire inst_break = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[20];
+
+// Check all implemented instructions
+wire inst_known = inst_add_w | inst_sub_w | ... | inst_rdcntvh;
+
+// Exception and interrupt generation
+wire id_ex_int     = has_int & id_valid;         // Interrupt exception
+wire id_ex_syscall = inst_syscall;               // System call exception
+wire id_ex_break   = inst_break;                 // Breakpoint exception
+wire id_ex_ine     = ~inst_known & id_valid;     // Instruction not exist exception
+
+// Priority encoding for exception codes
+wire id_ex_valid = if_ex_valid | id_ex_int | id_ex_syscall | 
+                   id_ex_break | id_ex_ine;
+wire [5:0] id_ecode = if_ex_valid   ? if_ecode :
+                      id_ex_int     ? `ECODE_INT :
+                      id_ex_syscall ? `ECODE_SYS :
+                      id_ex_break   ? `ECODE_BRK :
+                      id_ex_ine     ? `ECODE_INE : 6'd0;
+\end{lstlisting}
+
+这里采用了优先级编码，当多个异常同时发生时，程序顺序靠前的异常（来自IF级的异常）优先级最高。此外，为防止异常指令修改处理器状态，我们在\texttt{gr\_we}信号中加入了\texttt{\textasciitilde{}id\_ex\_valid}条件，确保发生异常时不写入通用寄存器。
+
+\paragraph{地址非对齐异常（ALE）检测}
+
+地址非对齐异常在EXEU模块的执行级检测。该异常针对load/store指令，要求半字访问地址2字节对齐，字访问地址4字节对齐：
+
+\begin{lstlisting}[language=Verilog]
+// Address alignment check for memory operations
+wire is_mem_op = (exe_mem_op != 4'd0);
+wire is_half_op = (exe_mem_op == 4'd1) | (exe_mem_op == 4'd5) | 
+                  (exe_mem_op == 4'd9);  // ld.h, st.h, ld.hu
+wire is_word_op = (exe_mem_op == 4'd2) | (exe_mem_op == 4'd6); // ld.w, st.w
+
+wire addr_align_error = is_mem_op & (
+    (is_half_op & exe_alu_result[0]) |           // Half-word: 2-byte aligned
+    (is_word_op & (|exe_alu_result[1:0]))        // Word: 4-byte aligned
+);
+wire exe_gen_ex_valid = addr_align_error;
+wire [5:0] exe_gen_ecode = addr_align_error ? `ECODE_ALE : 6'd0;
+
+// Priority: local exception > pipeline exception
+wire exe_to_mem_ex_valid = exe_gen_ex_valid ? 1'b1 : exe_ex_valid;
+wire [5:0] exe_to_mem_ecode = exe_gen_ex_valid ? exe_gen_ecode : exe_ecode;
+\end{lstlisting}
+
+检测到地址非对齐时，本级产生的异常优先于从上一级传递来的异常。同时，访存地址（\texttt{exe\_alu\_result}）被添加到流水线寄存器中作为\texttt{vaddr}字段，用于更新BADV寄存器。
+
+\paragraph{SYSCALL和ERTN指令的实现}
+
+\texttt{syscall}指令用于触发系统调用异常，\texttt{ertn}指令用于从异常处理返回。这两条指令在IDU中译码后，分别标记为系统调用异常和异常返回标志，随流水线传递至WB级处理：
+
+\begin{lstlisting}[language=Verilog]
+// Instruction decode
+wire inst_syscall = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & 
+                    op_19_15_d[22];
+wire inst_ertn = op_31_26_d[1] & op_25_22_d[9] & op_21_20_d[0] & 
+                 op_19_15_d[16] & (rk == 5'h0e) & (~|rj) & (~|rd);
+
+// Mark exception/ertn for pipeline propagation
+wire id_ex_syscall = inst_syscall;
+wire id_is_ertn = if_is_ertn | inst_ertn;
+\end{lstlisting}
+
+在WB级，当\texttt{syscall}到达时产生系统调用异常，CSR模块更新相关状态寄存器（CRMD、PRMD、ESTAT、ERA等）并生成异常入口地址；当\texttt{ertn}到达时，CSR模块恢复CRMD寄存器并生成返回地址。这两种情况都会产生全局冲刷信号\texttt{flush}，清空流水线并跳转到目标地址。
+
+\paragraph{写回级的异常统一处理}
+
+所有异常最终在WBU模块中统一提交。WB级将异常信息传递给CSR模块，并产生全局冲刷信号：
+
+\begin{lstlisting}[language=Verilog]
+// Exception/ERTN outputs
+assign wb_ex_valid = wb_valid & (wb_ex_valid_r | wb_gen_ex_valid);
+assign wb_ex_pc = wb_pc;
+assign wb_vaddr = wb_vaddr_r;  // For BADV register
+assign wb_is_ertn = wb_valid & wb_is_ertn_r;
+\end{lstlisting}
+
+这些信号连接到CSR模块，触发异常处理流程。同时，\texttt{wb\_ex\_valid}或\texttt{wb\_is\_ertn}信号会生成全局冲刷，确保异常指令之后的所有指令被取消执行，实现精确异常。
+
+\subsubsection{CSR读写指令的实现}
+
+\paragraph{CSR读写信息的流水线传递}
+
+为方便起见，当前阶段统一在WB阶段读写CSR寄存器。CSR读写指令在ID阶段被解码，产生如下的流水线信号并随流水线传递至WB阶段，由WB统一执行读写。
+
+\begin{lstlisting}[language=Verilog]
+// CSR pipleline fields: {csr_read, csr_we, csr_num[13:0], csr_wmask[31:0], csr_wvalue[31:0]}
+`define CSR_FIELDS_LEN 80
+\end{lstlisting}
+
+\paragraph{阻塞解决CSR指令引发的数据相关}
+
+CSR指令有可能引发数据相关。比如前一条指令将CSR中的值保存进寄存器1，而后一条指令以寄存器1为源操作数，在后一条指令进入ID阶段解码的时候，前一条指令还没有进入WB阶段读取CSR寄存器，由此触发数据相关。
+
+由于CSR读写指令的密度稀少，针对此进行优化的收益低，故简单起见，本实验中采用阻塞解决。在ID阶段后的各个阶段前递给ID的数据中，设置 res\_from\_exe, res\_from\_mem, res\_from\_wb信号，之后ID阶段负责识别这些信号，使当前级陷入阻塞，从而阻塞整条流水线，避免数据相关。ID阶段的代码如下：
+
+\begin{lstlisting}[language=Verilog]
+assign id_stall = ((exe_res_from_mem | exe_from_csr) & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2)))
+|
+     ((mem_res_from_mem | mem_from_csr) & ((conflict_r1_mem & need_r1) | (conflict_r2_mem & need_r2))) |
+      ((wb_from_csr)                     & ((conflict_r1_wb  & need_r1) | (conflict_r2_wb  & need_r2)));
+\end{lstlisting}
+
+\section{实验过程中遇到的问题}
+
+\subsection{异常信号的前递问题}
+
+在EXE级需要向内存发送读写请求，此时若在EXE级之后的指令若产生异常，则当前EXE级中的指令应该被冲刷掉，因此请求不应该被发出。由于在当前的CPU当中，在MEM与WB阶段不额外产生新的异常，故可以通过将MEM与WB阶段的异常信号前递，在EXE级别统一判断是否接发送请求。原设计中缺少这一部分，导致报错。修复后，MEM与WB级前递的信号为 mem\_ex与 wb\_ex，之后由如下逻辑判断是否可以正常发送请求：
+
+\begin{lstlisting}[language=Verilog]
+wire exe_multicycle_ok = exe_valid & ~(mem_ex | wb_ex | exe_to_mem_ex_valid | exe_to_mem_is_ertn);
+
+assign data_sram_en = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok;
+\end{lstlisting}
+
+\subsection{异常发生后的多周期指令处理问题}
+
+在syscall进入WB级进行异常处理时，后续的2条指令可能分别都进入了EXE级和MEM级。特别地，如果这两条指令中存在多周期指令（如mul, div, 访存等），可能已经开始执行。此时如果需要冲刷，不能简单地拉低valid（否则多周期状态机可能已经开始执行，状态机执行完成后输出错误结果）。因此，需要通过异常前递信号判断先前的指令是否已经产生了异常。若已经产生，则不执行后续的多周期指令。
+
+\subsection{先前遗留的译码逻辑问题}
+
+在原先的实现中，由于分支指令在ID阶段有单独的比较器，所以没有解码产生相应的alu\_op，导致基于alu\_op信号的need\_r1信号出现问题，进而导致ID阶段的stall逻辑在一些分支指令上没有正确触发，如下图pc=1c00800c所示是beq指令，它的need\_r1信号为0
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/decode_logic_problem_demo.jpg}
+  \caption{译码逻辑问题示例图}
+  \label{fig:processor_structure}
+\end{figure}
+
+在ID阶段完善 alu\_op 信号的译码，即可修复问题：
+
+\begin{lstlisting}[language=Verilog]
+    // ALU operation encoding (extended to 18 bits for multiply/divide)
+    assign alu_op[0]  = inst_add_w | inst_addi_w | ty_M |
+                        inst_jirl  | inst_bl     | inst_pcaddu12i;
+    assign alu_op[1]  = inst_sub_w | inst_bne    | inst_beq;
+    assign alu_op[2]  = inst_slt   | inst_slti   | inst_blt    | inst_bge;
+    assign alu_op[3]  = inst_sltu  | inst_sltui  | inst_bltu   | inst_bgeu;
+    assign alu_op[4]  = inst_and   | inst_andi;
+    assign alu_op[5]  = inst_nor;
+    assign alu_op[6]  = inst_or    | inst_ori;
+    assign alu_op[7]  = inst_xor   | inst_xori;
+    assign alu_op[8]  = inst_sll_w | inst_slli_w;
+    assign alu_op[9]  = inst_srl_w | inst_srli_w;
+    assign alu_op[10] = inst_sra_w | inst_srai_w;
+    assign alu_op[11] = inst_lu12i_w;
+\end{lstlisting}
+
+
+\subsection{ESTAT寄存器高阻态问题}
+
+在编写完实验13的代码，运行仿真测试时，发现ESTAT信号初始化为高阻态：
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{fig/estat_problem_demo.jpg}
+  \caption{ESTAT初始化问题示例图}
+  \label{fig:processor_structure}
+\end{figure}
+
+观察发现其中第12与2~9位为高阻态，对应hw\_init\_in与ipi\_init\_in。原因是这两个信号一路被拉到了顶层封装my\_cputop的接口，超出了最高层实例化的范围。将其在my\_cputop中手动设置为0即可。
+
+\section{实验结果}
+
+所有测试均通过验证，证明了我们实现的CPU能够正确支持异常和中断处理。
+
+\section{小组成员分工}
+
+陈琛：实现了CSR模块。修复EXE多周期指令问题。
+
+张钧玮：负责CSR指令与计时器指令的实现，添加异常信号前递机制。
+
+王荦璠：负责异常和中断的流水线实现。实现了syscall和ertn指令，设计了异常信息在流水线中的传递机制。
+
+\end{document}

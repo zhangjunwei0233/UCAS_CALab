@@ -3,6 +3,12 @@ module IDU(
     input  wire        clk,
     input  wire        resetn,
 
+    // Global flush from WB (exception/ertn)
+    input  wire        flush,
+    
+    // Interrupt interface
+    input  wire        has_int,
+
     // Pipeline interface with IF stage
     output wire        id_allowin,
     input  wire        if_to_id_valid,
@@ -16,9 +22,9 @@ module IDU(
     output wire [`ID2EXE_LEN - 1:0] id_to_exe_zip,
 
     // Data forwarding to resolve data relevance
-    input  wire [37:0] wb_rf_zip,   // {wb_rf_we, wb_rf_waddr, wb_rf_wdata}
-    input  wire [38:0] mem_rf_zip,  // {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_rf_wdata}
-    input  wire [38:0] exe_rf_zip   // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
+    input  wire [38:0] wb_rf_zip,   // {wb_from_csr, wb_rf_we, wb_rf_waddr, wb_rf_wdata}
+    input  wire [39:0] mem_rf_zip,  // {mem_from_csr, mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result}
+    input  wire [39:0] exe_rf_zip   // {exe_from_csr, exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
 );
 
     // Pipeline control
@@ -27,6 +33,12 @@ module IDU(
     reg         id_valid;
     reg  [31:0] inst;
     reg  [31:0] id_pc;
+    
+    // Exception pipeline fields from IF
+    reg         if_ex_valid;
+    reg  [5:0]  if_ecode;
+    reg  [8:0]  if_esubcode;
+    reg         if_is_ertn;
 
     // ALU control (extended to 19 bits for multiply/divide operations)
     wire [18:0] alu_op;
@@ -34,7 +46,7 @@ module IDU(
     wire        src1_is_pc, src2_is_imm;
 
     // Control signals
-    wire        res_from_mem, dst_is_r1, gr_we;
+    wire        res_from_mem, dst_is_r1, dst_is_rj, gr_we;
     wire [3: 0] mem_op;
     wire        src_reg_is_rd;
     wire [4: 0] dest;
@@ -75,6 +87,7 @@ module IDU(
     wire [ 4:0] wb_rf_waddr, mem_rf_waddr, exe_rf_waddr;
     wire [31:0] wb_rf_wdata, mem_rf_wdata, exe_rf_wdata;
     wire        mem_res_from_mem, exe_res_from_mem;
+    wire        exe_from_csr, mem_from_csr, wb_from_csr;
 
     // Data conflict signals
     wire        conflict_r1_wb, conflict_r2_wb;
@@ -88,11 +101,14 @@ module IDU(
     assign id_allowin = ~id_valid | (id_ready_go & exe_allowin);
     assign id_to_exe_valid = id_valid & id_ready_go;
 
-    assign id_stall = (exe_res_from_mem & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2))) |
-                      (mem_res_from_mem & ((conflict_r1_mem & need_r1) | (conflict_r2_mem & need_r2)));
+    assign id_stall = ((exe_res_from_mem | exe_from_csr) & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2))) |
+                      ((mem_res_from_mem | mem_from_csr) & ((conflict_r1_mem & need_r1) | (conflict_r2_mem & need_r2))) |
+                      ((wb_from_csr)                     & ((conflict_r1_wb  & need_r1) | (conflict_r2_wb  & need_r2)));
 
     always @(posedge clk) begin
         if (~resetn)
+            id_valid <= 1'b0;
+        else if (flush)
             id_valid <= 1'b0;
         else if (br_taken)
             id_valid <= 1'b0;
@@ -104,7 +120,7 @@ module IDU(
     // Pipeline register updates
     always @(posedge clk) begin
         if (if_to_id_valid & id_allowin) begin
-            {inst, id_pc} <= if_to_id_zip;
+            {inst, id_pc, if_ex_valid, if_ecode, if_esubcode, if_is_ertn} <= if_to_id_zip;
         end
     end
 
@@ -220,9 +236,9 @@ module IDU(
     // ALU operation encoding (extended to 18 bits for multiply/divide)
     assign alu_op[0]  = inst_add_w | inst_addi_w | ty_M |
                         inst_jirl  | inst_bl     | inst_pcaddu12i;
-    assign alu_op[1]  = inst_sub_w;
-    assign alu_op[2]  = inst_slt   | inst_slti;
-    assign alu_op[3]  = inst_sltu  | inst_sltui;
+    assign alu_op[1]  = inst_sub_w | inst_bne    | inst_beq;
+    assign alu_op[2]  = inst_slt   | inst_slti   | inst_blt    | inst_bge;
+    assign alu_op[3]  = inst_sltu  | inst_sltui  | inst_bltu   | inst_bgeu;
     assign alu_op[4]  = inst_and   | inst_andi;
     assign alu_op[5]  = inst_nor;
     assign alu_op[6]  = inst_or    | inst_ori;
@@ -239,6 +255,47 @@ module IDU(
     assign alu_op[16] = inst_mod_w;    // MOD.W: signed modulo
     assign alu_op[17] = inst_div_wu;   // DIV.WU: unsigned division
     assign alu_op[18] = inst_mod_wu;   // MOD.WU: unsigned modulo
+
+    // Privileged and system instructions
+    //   syscall ertn break csrrd csrwr csrxchg
+    wire inst_syscall = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[22];
+    wire inst_break   = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[20];
+    wire inst_ertn    = op_31_26_d[1] & op_25_22_d[9] & op_21_20_d[0] & op_19_15_d[16] & (rk == 5'h0e) & (~|rj) & (~|rd);
+    wire inst_csrrd   = op_31_26_d[1] & (op_25_22[3:2] == 2'b0) & (rj == 5'b0);
+    wire inst_csrwr   = op_31_26_d[1] & (op_25_22[3:2] == 2'b0) & (rj == 5'b1);
+    wire inst_csrxchg = op_31_26_d[1] & (op_25_22[3:2] == 2'b0) & (|rj[4:1]);
+
+    // Counter instructions
+    //    rdcntid rdcntvl rdcntvh
+    wire inst_rdcntid = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[0] & op_19_15_d[0] & (rk == 5'h18) & (rd == 5'h00);
+    wire inst_rdcntvl = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[0] & op_19_15_d[0] & (rk == 5'h18) & (rj == 5'h00);
+    wire inst_rdcntvh = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[0] & op_19_15_d[0] & (rk == 5'h19) & (rj == 5'h00);
+
+    // Check for known instructions
+    wire inst_known = inst_add_w  | inst_sub_w  | inst_slt    | inst_sltu   | inst_nor    | inst_and    | 
+                      inst_or     | inst_xor    | inst_sll_w  | inst_srl_w  | inst_sra_w  | inst_mul_w  |
+                      inst_mulh_w | inst_mulh_wu| inst_div_w  | inst_mod_w  | inst_div_wu | inst_mod_wu |
+                      inst_slli_w | inst_srli_w | inst_srai_w | inst_slti   | inst_sltui  | inst_addi_w |
+                      inst_andi   | inst_ori    | inst_xori   | inst_ld_b   | inst_ld_h   | inst_ld_w   |
+                      inst_ld_bu  | inst_ld_hu  | inst_st_b   | inst_st_h   | inst_st_w   | inst_lu12i_w|
+                      inst_pcaddu12i | inst_jirl | inst_b | inst_bl | inst_beq | inst_bne | inst_blt |
+                      inst_bge    | inst_bltu   | inst_bgeu   | inst_syscall| inst_break  | inst_ertn   |
+                      inst_csrrd  | inst_csrwr  | inst_csrxchg | inst_rdcntid | inst_rdcntvl | inst_rdcntvh;
+
+    // Exception and interrupt generation  
+    wire id_ex_int     = has_int & id_valid;     // Interrupt exception
+    wire id_ex_syscall = inst_syscall;          // System call exception
+    wire id_ex_break   = inst_break;            // Break point exception
+    wire id_ex_ine     = ~inst_known & id_valid; // Instruction not exist exception
+    
+    wire        id_ex_valid   = if_ex_valid | id_ex_int | id_ex_syscall | id_ex_break | id_ex_ine;
+    wire [5:0]  id_ecode      = if_ex_valid ? if_ecode :
+                                id_ex_int   ? `ECODE_INT :
+                                id_ex_syscall ? `ECODE_SYS :
+                                id_ex_break ? `ECODE_BRK :
+                                id_ex_ine   ? `ECODE_INE : 6'd0;
+    wire [8:0]  id_esubcode   = if_ex_valid ? if_esubcode : `ESUBCODE_NONE;
+    wire        id_is_ertn    = if_is_ertn | inst_ertn;
 
     // Immediate type selection
     assign need_ui5  = ty_S;
@@ -262,15 +319,17 @@ module IDU(
     assign jirl_offs = {{14{i16[15]}}, i16[15:0], 2'b0};
 
     // Control signal generation
-    assign src_reg_is_rd = ty_B_COND | ty_M_ST;
+    assign src_reg_is_rd = ty_B_COND | ty_M_ST | inst_csrwr | inst_csrxchg;
     assign src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
     assign src2_is_imm = ty_S | ty_I | ty_M | ty_U | inst_jirl | inst_bl;
 
     assign res_from_mem = ty_M_LD;
     assign dst_is_r1 = inst_bl;
-    assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b) & id_valid;
+    assign dst_is_rj = inst_rdcntid;
+    assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_break | inst_ertn) & id_valid & ~id_ex_valid;
     assign mem_op = {4{ty_M}} & op_25_22;
-    assign dest = dst_is_r1 ? 5'd1 : rd;
+    assign dest = dst_is_r1 ? 5'd1 :
+                  dst_is_rj ?   rj : rd;
 
     // ALU source selection
     assign alu_src1 = src1_is_pc ? id_pc : rj_value;
@@ -283,9 +342,9 @@ module IDU(
     assign id_rf_waddr = dest;
 
     // Decode dataforwarding data
-    assign {wb_rf_we, wb_rf_waddr, wb_rf_wdata} = wb_rf_zip;
-    assign {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_rf_wdata} = mem_rf_zip;
-    assign {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_rf_wdata} = exe_rf_zip;
+    assign {wb_from_csr, wb_rf_we, wb_rf_waddr, wb_rf_wdata} = wb_rf_zip;
+    assign {mem_from_csr, mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_rf_wdata} = mem_rf_zip;
+    assign {exe_from_csr, exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_rf_wdata} = exe_rf_zip;
 
     regfile u_regfile(
         .clk    (clk),
@@ -313,8 +372,38 @@ module IDU(
                         conflict_r2_mem ? mem_rf_wdata:
                         conflict_r2_wb  ? wb_rf_wdata : rf_rdata2;
 
+    // CSR decode signals
+    wire id_csr_read      = inst_csrrd | inst_csrwr | inst_csrxchg | inst_rdcntid;
+    wire id_csr_we        = inst_csrwr | inst_csrxchg;
+    wire [31:0] id_csr_wmask     = id_csr_we ? (inst_csrxchg ? rj_value : 32'hffff_ffff) : 32'd0;
+    wire [31:0] id_csr_wvalue    = id_csr_we ? rkd_value : 32'd0;
+    wire [13:0] id_csr_num  = inst_rdcntid ? `CSR_TID : inst[23:10];
+
     // Output assignments
-    //                      19      1             32        32        4       1         5            32         32
-    assign id_to_exe_zip = {alu_op, res_from_mem, alu_src1, alu_src2, mem_op, id_rf_we, id_rf_waddr, rkd_value, id_pc};
+    assign id_to_exe_zip = {
+            alu_op,  // 19
+            res_from_mem,  // 1
+            alu_src1,  // 32
+            alu_src2,  // 32
+            mem_op,    // 4
+            id_rf_we,  // 1
+            id_rf_waddr,  // 5
+            rkd_value,  // 32
+            id_pc,  // 32
+
+            inst_rdcntvl,  // 1
+            inst_rdcntvh,  // 1
+
+            id_csr_read, // 1
+            id_csr_we,  // 1
+            id_csr_num,  // 14
+            id_csr_wmask,  // 32
+            id_csr_wvalue, // 32
+
+            id_ex_valid,  // 1
+            id_ecode,  // 6
+            id_esubcode,  //  9
+            id_is_ertn  // 1
+    };
 
 endmodule
