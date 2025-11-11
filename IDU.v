@@ -261,9 +261,9 @@ module IDU(
     wire inst_syscall = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[22];
     wire inst_break   = op_31_26_d[0] & op_25_22_d[0] & op_21_20_d[2] & op_19_15_d[20];
     wire inst_ertn    = op_31_26_d[1] & op_25_22_d[9] & op_21_20_d[0] & op_19_15_d[16] & (rk == 5'h0e) & (~|rj) & (~|rd);
-    wire inst_csrrd   = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (rj == 5'b0);
-    wire inst_csrwr   = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (rj == 5'b1);
-    wire inst_csrxchg = op_31_26_d[1] & (op_25_22_d[3:2] == 2'b0) & (|rj[4:1]);
+    wire inst_csrrd   = op_31_26_d[1] & (op_25_22[3:2] == 2'b0) & (rj == 5'b0);
+    wire inst_csrwr   = op_31_26_d[1] & (op_25_22[3:2] == 2'b0) & (rj == 5'b1);
+    wire inst_csrxchg = op_31_26_d[1] & (op_25_22[3:2] == 2'b0) & (|rj[4:1]);
 
     // Counter instructions
     //    rdcntid rdcntvl rdcntvh
