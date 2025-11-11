@@ -100,6 +100,9 @@
 本次实验的目标是在已有的流水线CPU基础上，添加特权态指令中的异常和中断功能。具体需要实现：
 
 \begin{itemize}
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+\setlength{\parskip}{0pt}
 \item CSR模块，包括CRMD、PRMD、ESTAT、ERA、EENTRY、SAVE0~3、ECFG、BADV、TID、TCFG、TVAL和TICLR共15个状态寄存器；
 \item 实现syscall和ertn指令，支持系统调用异常；
 \item 实现地址错（ADEF）、地址非对齐（ALE）、断点（BRK）和指令不存在（INE）异常，以及外部线中断；
