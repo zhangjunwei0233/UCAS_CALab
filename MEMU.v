@@ -138,7 +138,10 @@ module MEMU(
             mem_valid & mem_res_from_mem,
             mem_valid & mem_rf_we,
             mem_rf_waddr,
-            mem_rf_wdata
+            // Note: DO NOT forward mem_rf_data, since it will cause a
+            // direct logical path from data_sram to inst_sram!
+            // mem_rf_wdata
+            mem_alu_result
     };
 
     // Pipeline output to WB stage
