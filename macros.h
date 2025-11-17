@@ -24,7 +24,7 @@
 
     `define IF2ID_LEN (64 + `EX_FIELDS_LEN)    // {inst, pc, ex_fields}
     `define ID2EXE_LEN (158 + `CNT_INST_FIELDS_LEN +`CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., ex_fields}
-    `define EXE2MEM_LEN (75 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., vaddr, ex_fields}
+    `define EXE2MEM_LEN (76 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)  // {..., vaddr, ex_fields}
     `define MEM2WB_LEN (70 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN)   // {..., vaddr, ex_fields}
 
     // CSR registers

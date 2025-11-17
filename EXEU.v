@@ -16,11 +16,14 @@ module EXEU(
     output wire        exe_to_mem_valid,
     output wire [`EXE2MEM_LEN - 1:0] exe_to_mem_zip,
 
-    // Data SRAM interface
-    output wire        data_sram_en,
-    output wire [ 3:0] data_sram_we,
+    // Data SRAM-like interface
+    output wire        data_sram_req,
+    output wire        data_sram_wr,
+    output wire [ 1:0] data_sram_size,
     output wire [31:0] data_sram_addr,
+    output wire [ 3:0] data_sram_wstrb,
     output wire [31:0] data_sram_wdata,
+    input  wire        data_sram_addr_ok,
 
     // Data forwarding to ID stage
     output wire [39:0] exe_rf_zip,     // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
@@ -108,7 +111,9 @@ module EXEU(
         
     wire   start_multicycle;
     assign start_multicycle = is_multicycle_op & start_exe & exe_multicycle_ok;  // Special time stamp
-    assign exe_ready_go = ~start_multicycle & ~multicycle_executing;
+    
+    // EXE ready_go: no pending multicycle ops and memory request done
+    assign exe_ready_go = ~start_multicycle & ~multicycle_executing & (~exe_mem_req | exe_mem_req & data_sram_addr_ok);
     assign exe_allowin = ~exe_valid | (exe_ready_go & mem_allowin);
     assign exe_to_mem_valid = exe_valid & exe_ready_go;
 
@@ -117,10 +122,10 @@ module EXEU(
             exe_valid <= 1'b0;
         else if (flush)
             exe_valid <= 1'b0;
-        else if (multicycle_executing | (id_to_exe_valid & exe_allowin) | start_multicycle)
+        else if (multicycle_executing | start_multicycle)
             exe_valid <= 1'b1;
-        else
-            exe_valid <= 1'b0;
+        else if (exe_allowin)
+            exe_valid <= id_to_exe_valid;
     end
 
     // Pipeline register updates
@@ -230,45 +235,55 @@ module EXEU(
                           exe_rdcntvh    ? stable_clk_counter[63:32] : // RDCNTVH: stable counter high 32 bits
                           exe_alu_result;                              // Regular ALU result
 
-    // Data SRAM interface
+    // Data SRAM-like interface
     wire addr0 = (exe_alu_result[1:0] == 2'd0);
     wire addr1 = (exe_alu_result[1:0] == 2'd1);
     wire addr2 = (exe_alu_result[1:0] == 2'd2);
     wire addr3 = (exe_alu_result[1:0] == 2'd3);
 
-    assign data_sram_en     = (exe_res_from_mem | exe_mem_op[2]) & exe_multicycle_ok;
-    assign data_sram_we    = data_sram_en ? 
-                             ( // st.b
-                               (exe_mem_op == 4) ?
+    wire is_byte_op = (exe_mem_op == 4'd0) | (exe_mem_op == 4'd4) | (exe_mem_op == 4'd8);  // ld.b, st.b, ld.bu
+    wire is_store = exe_mem_op[2];  // st.b, st.h, st.w
+
+    // Only send request when MEM stage allows in (simplified design)
+    wire   exe_mem_req;
+    assign exe_mem_req = exe_res_from_mem | is_store;
+    assign data_sram_req = exe_mem_req & exe_valid & mem_allowin;
+    assign data_sram_wr = is_store & exe_multicycle_ok;
+    assign data_sram_size = is_byte_op ? 2'd0 :   // 1 byte
+                            is_half_op ? 2'd1 :   // 2 bytes
+                            is_word_op ? 2'd2 :   // 4 bytes
+                            2'd0;
+    
+    assign data_sram_wstrb =   // st.b
+                               (exe_mem_op == 4'd4) ?
                                ( addr0 ? 4'b0001 :
                                  addr1 ? 4'b0010 :
                                  addr2 ? 4'b0100 :
                                  addr3 ? 4'b1000 :
                                  4'b0000) :
                                // st.h
-                               (exe_mem_op == 5) ?
+                               (exe_mem_op == 4'd5) ?
                                ( (addr0 | addr1) ? 4'b0011 :
                                  (addr2 | addr3) ? 4'b1100 :
                                  4'b0000 ) :
                                // st.w
-                               (exe_mem_op == 6) ?
-                               ( 4'b1111 ) : 4'b0000
-                               ) : 4'b0000;
-    assign data_sram_addr   = exe_alu_result & ~32'd3; // Alignment
+                               (exe_mem_op == 4'd6) ?
+                               ( 4'b1111 ) : 4'b0000;
+    assign data_sram_addr   = exe_alu_result;
     assign data_sram_wdata  = // st.b
-                              (exe_mem_op == 4) ?
+                              (exe_mem_op == 4'd4) ?
                               ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
                                 addr1 ? {16'd0, exe_rkd_value[7:0],  8'd0} :
                                 addr2 ? { 8'd0, exe_rkd_value[7:0], 16'd0} :
                                 addr3 ? {       exe_rkd_value[7:0], 24'd0} :
                                 32'd0 ) :
                               // st.h
-                              (exe_mem_op == 5) ?
+                              (exe_mem_op == 4'd5) ?
                               ( (addr0 | addr1) ? {16'd0, exe_rkd_value[15:0]} :
                                 (addr2 | addr3) ? {exe_rkd_value[15:0], 16'd0} :
                                 32'd0 ) :
                               // st.w
-                              (exe_mem_op == 6) ?
+                              (exe_mem_op == 4'd6) ?
                               ( exe_rkd_value ) :
                               // default
                               32'd0;
@@ -284,6 +299,7 @@ module EXEU(
 
     // Output assignment
     assign exe_to_mem_zip = {
+            exe_mem_req,
             exe_res_from_mem,
             exe_rf_we,
             exe_rf_waddr,

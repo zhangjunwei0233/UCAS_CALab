@@ -2,17 +2,25 @@
 module mycpu_top(
     input  wire        clk,
     input  wire        resetn,
-    // inst sram interface
-    output wire        inst_sram_en,
-    output wire [ 3:0] inst_sram_we,  // byte write enable
+    // inst sram-like interface
+    output wire        inst_sram_req,
+    output wire        inst_sram_wr,
+    output wire [ 1:0] inst_sram_size,
     output wire [31:0] inst_sram_addr,
+    output wire [ 3:0] inst_sram_wstrb,
     output wire [31:0] inst_sram_wdata,
+    input  wire        inst_sram_addr_ok,
+    input  wire        inst_sram_data_ok,
     input  wire [31:0] inst_sram_rdata,
-    // data sram interface
-    output wire        data_sram_en,
-    output wire [ 3:0] data_sram_we,  // byte write enable
+    // data sram-like interface
+    output wire        data_sram_req,
+    output wire        data_sram_wr,
+    output wire [ 1:0] data_sram_size,
     output wire [31:0] data_sram_addr,
+    output wire [ 3:0] data_sram_wstrb,
     output wire [31:0] data_sram_wdata,
+    input  wire        data_sram_addr_ok,
+    input  wire        data_sram_data_ok,
     input  wire [31:0] data_sram_rdata,
     // trace debug interface
     output wire [31:0] debug_wb_pc,
@@ -47,6 +55,7 @@ module mycpu_top(
     wire        mem_ex;
 
     // Brach resolving
+    wire        br_stall;
     wire        br_taken;
     wire [31:0] br_target;
 
@@ -80,14 +89,19 @@ module mycpu_top(
         .flush(flush),
         .flush_target(flush_target),
 
-        .inst_sram_en(inst_sram_en),
-        .inst_sram_we(inst_sram_we),
+        .inst_sram_req(inst_sram_req),
+        .inst_sram_wr(inst_sram_wr),
+        .inst_sram_size(inst_sram_size),
         .inst_sram_addr(inst_sram_addr),
+        .inst_sram_wstrb(inst_sram_wstrb),
         .inst_sram_wdata(inst_sram_wdata),
+        .inst_sram_addr_ok(inst_sram_addr_ok),
+        .inst_sram_data_ok(inst_sram_data_ok),
         .inst_sram_rdata(inst_sram_rdata),
         
         .id_allowin(id_allowin),
         .if_to_id_valid(if_to_id_valid),
+        .br_stall(br_stall),
         .br_taken(br_taken),
         .br_target(br_target),
         .if_to_id_zip(if_to_id_zip)
@@ -101,6 +115,7 @@ module mycpu_top(
         .has_int(csr_has_int),
 
         .id_allowin(id_allowin),
+        .br_stall(br_stall),
         .br_taken(br_taken),
         .br_target(br_target),
         .if_to_id_valid(if_to_id_valid),
@@ -128,10 +143,13 @@ module mycpu_top(
         .exe_to_mem_valid(exe_to_mem_valid),
         .exe_to_mem_zip(exe_to_mem_zip),
 
-        .data_sram_en(data_sram_en),
-        .data_sram_we(data_sram_we),
+        .data_sram_req(data_sram_req),
+        .data_sram_wr(data_sram_wr),
+        .data_sram_size(data_sram_size),
         .data_sram_addr(data_sram_addr),
+        .data_sram_wstrb(data_sram_wstrb),
         .data_sram_wdata(data_sram_wdata),
+        .data_sram_addr_ok(data_sram_addr_ok),
 
         .exe_rf_zip(exe_rf_zip),
         .mem_ex(mem_ex),
@@ -151,10 +169,12 @@ module mycpu_top(
         .mem_to_wb_valid(mem_to_wb_valid),
         .mem_to_wb_zip(mem_to_wb_zip),
 
+        .data_sram_data_ok(data_sram_data_ok),
         .data_sram_rdata(data_sram_rdata),
 
         .mem_rf_zip(mem_rf_zip),
-        .mem_ex(mem_ex)
+        .mem_ex(mem_ex),
+        .wb_ex(wb_ex)
     ) ;
 
     WBU my_wbu(

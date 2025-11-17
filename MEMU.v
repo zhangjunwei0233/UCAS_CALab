@@ -16,14 +16,16 @@ module MEMU(
     output wire        mem_to_wb_valid,
     output wire [`MEM2WB_LEN - 1:0] mem_to_wb_zip,
 
-    // Data SRAM interface
+    // Data SRAM-like interface
+    input  wire        data_sram_data_ok,
     input  wire [31:0] data_sram_rdata,
 
     // Data forwarding to ID stage
     output wire [39:0] mem_rf_zip,
 
     // Exception signal forwarding to EXE stage
-    output wire        mem_ex
+    output wire        mem_ex,
+    input  wire        wb_ex
 );
     // Pipeline control
     wire        mem_ready_go;
@@ -50,8 +52,14 @@ module MEMU(
 
     wire [31:0] mem_rf_wdata;
 
+    // SRAM-like interface control
+    wire        mem_wait_data_ok;
+    reg         mem_wait_data_ok_r;
+
+    assign mem_wait_data_ok = mem_wait_data_ok_r & mem_valid & ~wb_ex;
+
     // Pipeline state control
-    assign mem_ready_go = 1'b1;
+    assign mem_ready_go = ~mem_wait_data_ok | mem_wait_data_ok & data_sram_data_ok;
     assign mem_allowin = ~mem_valid | (mem_ready_go & wb_allowin);
     assign mem_to_wb_valid = mem_valid & mem_ready_go;
 
@@ -60,14 +68,14 @@ module MEMU(
             mem_valid <= 1'b0;
         else if (flush)
             mem_valid <= 1'b0;
-        else
-            mem_valid <= exe_to_mem_valid & mem_allowin;
+        else if (mem_allowin)
+            mem_valid <= exe_to_mem_valid;
     end
 
     // Pipeline register updates
     always @(posedge clk) begin
         if (exe_to_mem_valid & mem_allowin) begin
-            {mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result, mem_mem_op, mem_pc,
+            {mem_wait_data_ok_r, mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result, mem_mem_op, mem_pc,
              mem_csr_read, mem_csr_we, mem_csr_num, mem_csr_wmask, mem_csr_wvalue,
              mem_vaddr,
              mem_ex_valid, mem_ecode, mem_esubcode, mem_is_ertn} <= exe_to_mem_zip;
@@ -130,7 +138,7 @@ module MEMU(
             mem_valid & mem_res_from_mem,
             mem_valid & mem_rf_we,
             mem_rf_waddr,
-            mem_alu_result
+            mem_rf_wdata
     };
 
     // Pipeline output to WB stage
