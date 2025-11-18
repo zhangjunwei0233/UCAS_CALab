@@ -246,7 +246,7 @@ module EXEU(
 
     // Only send request when MEM stage allows in (simplified design)
     wire   exe_mem_req;
-    assign exe_mem_req = exe_res_from_mem | is_store;
+    assign exe_mem_req = (exe_res_from_mem | is_store) & exe_multicycle_ok;
     assign data_sram_req = exe_mem_req & exe_valid & mem_allowin;
     assign data_sram_wr = is_store & exe_multicycle_ok;
     assign data_sram_size = is_byte_op ? 2'd0 :   // 1 byte
