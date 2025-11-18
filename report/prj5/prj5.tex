@@ -1,0 +1,473 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper]{geometry}
+\geometry{left=2.0cm,right=2.0cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{ctex} % 支持中文的LaTeX宏包
+\usepackage{amsmath,amsfonts,graphicx,amssymb,bm,amsthm,mathrsfs,mathtools,breqn} % 数学公式和符号的宏包集合
+\usepackage{algorithm,algorithmicx} % 算法和伪代码
+\usepackage[noend]{algpseudocode} % 算法和伪代码
+\usepackage{fancyhdr} % 自定义页眉页脚
+\usepackage[framemethod=TikZ]{mdframed} % 创建带边框的框架
+\usepackage{fontspec} % 字体设置
+\usepackage{adjustbox} % 调整盒子大小
+\usepackage{fontsize} % 设置字体大小
+\usepackage{tikz,xcolor} % 绘制图形和使用颜色
+\usepackage{multicol} % 多栏排版
+\usepackage{multirow} % 表格中合并单元格
+\usepackage{pdfpages} % 插入PDF文件
+\usepackage{listings} % 在文档中插入源代码
+\usepackage{wrapfig} % 文字绕排图片
+\usepackage{bigstrut,multirow,rotating} % 支持在表格中使用特殊命令
+\usepackage{booktabs} % 创建美观的表格
+\usepackage{circuitikz} % 绘制电路图
+\usepackage{zhnumber} % 中文序号（用于标题）
+\usepackage{tabularx} % 表格折行
+\usepackage{float} % 图片插入
+\usepackage{longtable} % 长表格
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+\lstset{
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=fixed,
+  framerule=1pt,
+  rulecolor=\color{gray!35},
+  backgroundcolor=\color{gray!5},
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+}
+
+% 轻松引用, 可以用\cref{}指令直接引用, 自动加前缀. 
+% 例: 图片label为fig:1
+% \cref{fig:1} => Figure.1
+% \ref{fig:1}  => 1
+\usepackage[capitalize]{cleveref}
+% \crefname{section}{Sec.}{Secs.}
+\Crefname{section}{Section}{Sections}
+\Crefname{table}{Table}{Tables}
+\crefname{table}{Table.}{Tabs.}
+
+% \setmainfont{Palatino Linotype.ttf}
+% \setCJKmainfont{SimHei.ttf}
+% \setCJKsansfont{Songti.ttf}
+% \setCJKmonofont{SimSun.ttf}
+\punctstyle{kaiming}
+% 偏好的几个字体, 可以根据需要自行加入字体ttf文件并调用
+
+\renewcommand{\emph}[1]{\begin{kaishu}#1\end{kaishu}}
+
+% 对 section 等环境的序号使用中文
+\renewcommand \thesection{\zhnum{section}、}
+\renewcommand \thesubsection{\arabic{subsection}}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%改这里可以修改实验报告表头的信息
+\newcommand{\name}{陈琛、王荦璠、张钧玮}
+\newcommand{\studentNum}{80}
+\newcommand{\major}{计算机科学与技术}
+\newcommand{\labNum}{5}
+\newcommand{\labName}{AXI总线接口设计专题}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\begin{center}
+  \LARGE \bf 中国科学院大学 \\《计算机体系结构（研讨课）》实验报告
+\end{center}
+
+\begin{center}
+  \emph{姓名} \underline{\makebox[12em][c]{\name}} 
+  \emph{箱子号} \underline{\makebox[7em][c]{\studentNum}}
+  \emph{专业} \underline{\makebox[15em][c]{\major}}\\
+  \emph{实验项目编号} \underline{\makebox[3em][c]{\labNum}}
+  \emph{实验名称} \underline{\makebox[30em][c]{\labName}}\\
+\end{center}
+
+\section{实验任务}
+
+本次实验是AXI总线接口设计专题，包含三个递进式的实践任务。实验的总体目标是为CPU增加AMBA AXI总线接口，使CPU能够通过总线与系统中的内存、外设进行交互。工作划分为三个阶段：首先实现类SRAM总线接口作为过渡，然后设计类SRAM-AXI转接桥实现AXI固定延迟验证，最后完善设计以支持AXI随机延迟验证。
+
+\begin{itemize}
+    \item \textbf{实践任务14：添加类SRAM总线支持}
+    
+    将CPU对外接口从标准SRAM接口修改为类SRAM总线接口。类SRAM总线在SRAM接口的基础上增加了握手信号（\texttt{size}、\texttt{addr\_ok}、\texttt{data\_ok}），可以支持不确定的访存延迟。主要工作包括：修改取指单元（IFU）、执行单元（EXEU）和访存单元（MEMU），调整流水线各级的阻塞控制逻辑以适应握手协议，处理异常清空流水线时的特殊情况。完成后需要在采用握手机制的Block RAM的SoC验证环境中通过功能测试。
+    
+    \item \textbf{实践任务15：添加AXI总线支持}
+    
+    在类SRAM接口CPU的基础上，设计实现类SRAM-AXI转接桥，将CPU顶层接口修改为AXI总线接口。CPU对外只有一个AXI接口，需在转接桥内部完成取指和数据访问的2×1仲裁。设计一个2×1的类SRAM-AXI转接桥模块，将实践任务14完成的类SRAM接口CPU与该转接桥拼接，封装为AXI接口的myCPU。完成后需要在采用AXI总线的SoC验证环境中通过固定延迟功能验证，要求成功通过仿真和上板验证。
+    
+    \item \textbf{实践任务16：完成AXI随机延迟验证}
+    
+    完善实践任务15的AXI总线接口设计，使其能够正确处理AXI总线的各种复杂情况，包括随机的读写延迟、多个未完成事务的管理、读写相关性等。完成后需要在采用AXI总线的SoC验证环境中通过随机延迟功能验证，要求成功通过仿真和上板验证。
+\end{itemize}
+
+\section{设计详细分析}
+
+\subsection{总体设计思路}
+
+在原有的CPU设计中，取指和访存部分使用的是标准SRAM接口，该接口的特点是请求发出后会在固定的时钟周期内返回数据。然而在引入类SRAM总线接口后，数据返回的时间变得不确定，这就要求我们重新设计流水线的控制逻辑。
+
+我们采用的总体设计思路是通过握手机制来实现流水线与总线接口的同步。类SRAM总线接口引入了两个握手信号：\texttt{addr\_ok}用于地址请求的握手，\texttt{data\_ok}用于数据响应的握手。只有当主方发出请求（\texttt{req}为1）且从方返回确认（\texttt{addr\_ok}为1）时，地址请求才算成功；类似地，只有当从方返回\texttt{data\_ok}信号时，数据传输才算完成。
+
+为了降低设计复杂度，在取指阶段，仅当IF级允许接收新指令（\texttt{if\_allowin}为1）时，pre-IF级才发出取指请求；在访存阶段，仅当MEM级允许接收新指令（\texttt{mem\_allowin}为1）时，EXE级才发出访存请求。这种设计避免了多个未完成请求的复杂管理，但代价是可能会略微降低性能。
+
+流水线控制的核心在于各级的\texttt{ready\_go}信号。对于发起请求的流水级，只有当请求握手成功（\texttt{req \& addr\_ok}）时，\texttt{ready\_go}才能置为1；对于接收数据的流水级，只有当数据返回握手成功（\texttt{data\_ok}）时，\texttt{ready\_go}才能置为1。通过这种机制，流水线能够自动适应总线接口的延迟变化。
+
+除了基本的握手机制外，还需要特别处理两种情况：一是当指令已经取回但由于下一级流水阻塞而无法进入时，需要设置指令缓存来保存这些指令；二是当发生异常清空流水线时，已发出但尚未完成的请求所返回的数据需要被正确丢弃，以避免将错误的指令或数据引入流水线。
+
+\subsection{处理器结构设计框图}
+
+\subsection{关键设计模块}
+
+\subsubsection{取指单元（IFU）的类SRAM接口设计}
+
+取指单元的修改是本次实验的重点之一。取指操作被划分为pre-IF和IF两个流水级：pre-IF级生成取指地址并发出请求，IF级接收返回的指令。引入类SRAM接口后，这两级的控制逻辑都需要做出相应调整。
+
+首先，在接口信号方面，我们将标准SRAM接口的\texttt{inst\_sram\_en}信号替换为\texttt{inst\_sram\_req}，并增加了\texttt{inst\_sram\_size}、\texttt{inst\_sram\_addr\_ok}和\texttt{inst\_sram\_data\_ok}三个信号。由于取指操作总是读取4字节的指令，因此\texttt{inst\_sram\_size}恒为\texttt{2'b10}，\texttt{inst\_sram\_wr}恒为0。取指地址通过\texttt{inst\_sram\_addr}输出，返回的指令通过\texttt{inst\_sram\_rdata}输入。
+
+\begin{lstlisting}[language=Verilog]
+// Instruction SRAM-like interface
+output  wire        inst_sram_req,
+output  wire        inst_sram_wr,
+output  wire [ 1:0] inst_sram_size,
+output  wire [31:0] inst_sram_addr,
+output  wire [ 3:0] inst_sram_wstrb,
+output  wire [31:0] inst_sram_wdata,
+input   wire        inst_sram_addr_ok,
+input   wire        inst_sram_data_ok,
+input   wire [31:0] inst_sram_rdata,
+\end{lstlisting}
+
+在pre-IF级的设计中，仅当IF级允许接收新指令时才发出取指请求。这样可以避免在IF级阻塞时pre-IF级发出多个请求的复杂情况。具体实现如下：
+
+\begin{lstlisting}[language=Verilog]
+// Request handshake: only send request when IF allows in
+assign inst_sram_req = if_allowin & resetn & ~br_stall;
+assign req_handshake = inst_sram_req & inst_sram_addr_ok;
+assign pre_if_ready_go = req_handshake;
+\end{lstlisting}
+
+这里\texttt{br\_stall}是分支阻塞信号，当译码级的转移指令因为数据相关而无法计算跳转目标时会将其置为1，此时需要暂停取指。\texttt{req\_handshake}信号表示请求握手成功，只有在这种情况下pre-IF级才算完成了本拍的任务，\texttt{pre\_if\_ready\_go}才能置为1。
+
+IF级的设计需要考虑指令返回的时机。由于\texttt{data\_ok}信号的到来时间不确定，可能出现指令已经返回但ID级尚未准备好接收的情况。为了避免丢失已返回的指令，我们设置了一个指令缓存：
+
+\begin{lstlisting}[language=Verilog]
+// Instruction buffer: store instruction when IF can't enter ID
+reg  [31:0] inst_buff;
+reg         inst_buff_valid;
+
+always @(posedge clk) begin
+    if (~resetn) begin
+        inst_buff <= 32'b0;
+        inst_buff_valid <= 1'b0;
+    end
+    else if (if_to_id_valid & id_allowin)
+        inst_buff_valid <= 1'b0;
+    else if (if_cancel)
+        inst_buff_valid <= 1'b0;
+    else if (~inst_buff_valid & inst_sram_data_ok & ~inst_discard) begin
+        inst_buff <= if_inst;
+        inst_buff_valid <= 1'b1;
+    end
+end
+\end{lstlisting}
+
+当\texttt{data\_ok}到来时，如果指令缓存尚未有效且不需要丢弃当前指令，则将返回的指令保存到\texttt{inst\_buff}中。IF级的\texttt{ready\_go}信号需要同时考虑数据直接返回和缓存中有有效指令两种情况：
+
+\begin{lstlisting}[language=Verilog]
+assign if_ready_go = (inst_buff_valid | inst_sram_data_ok) & ~inst_discard;
+\end{lstlisting}
+
+异常清空流水线的处理是取指设计中的另一个关键点。当发生异常或者分支跳转时，流水线需要被清空，此时可能存在pre-IF级已经发出但IF级尚未收到响应的取指请求。如果不加处理，这些请求返回的指令可能会被误认为是新PC处的指令。为了解决这个问题，引入\texttt{inst\_discard}信号来标记需要丢弃的指令数据：
+
+\begin{lstlisting}[language=Verilog]
+// Cancel control: discard data when exception/branch cancels 
+// pending request
+reg inst_discard;
+always @(posedge clk) begin
+    if (~resetn)
+        inst_discard <= 1'b0;
+    else if (if_cancel & ~if_allowin & ~if_ready_go)
+        inst_discard <= 1'b1;
+    else if (inst_discard & inst_sram_data_ok)
+        inst_discard <= 1'b0;
+end
+\end{lstlisting}
+
+当异常取消发生时，如果IF级既不允许接收新指令（\texttt{if\_allowin}为0）又尚未准备好（\texttt{if\_ready\_go}为0），说明存在待完成的取指请求，此时将\texttt{inst\_discard}置为1；当收到\texttt{data\_ok}时，说明被取消的请求已经返回，可以将\texttt{inst\_discard}清零。在\texttt{inst\_discard}有效期间，\texttt{if\_ready\_go}会被强制为0，从而避免错误的指令进入ID级。
+
+此外，还需要处理在pre-IF级请求尚未被接收时就发生异常取消的情况。由于类SRAM总线允许在请求未被接收时更改请求内容，可以直接将下一拍的取指地址更新为异常处理地址。但为了确保状态的一致性，我们设置了寄存器来保存异常取消信号：
+
+\begin{lstlisting}[language=Verilog]
+reg flush_r;
+reg br_taken_r;
+reg [31:0] br_target_r;
+reg [31:0] flush_target_r;
+
+always @(posedge clk) begin
+    if (~resetn) begin
+        flush_r <= 1'b0;
+        br_taken_r <= 1'b0;
+        br_target_r <= 32'b0;
+        flush_target_r <= 32'b0;
+    end
+    else if (flush & ~pre_if_ready_go) begin
+        flush_r <= 1'b1;
+        flush_target_r <= flush_target;
+    end
+    else if (br_taken & ~pre_if_ready_go) begin
+        br_taken_r <= 1'b1;
+        br_target_r <= br_target;
+    end
+    else if (pre_if_ready_go) begin
+        flush_r <= 1'b0;
+        br_taken_r <= 1'b0;
+    end
+end
+\end{lstlisting}
+
+通过这些机制，取指单元能够正确处理类SRAM接口的握手协议和各种异常情况，确保取指操作的正确性。
+
+\subsubsection{执行单元（EXEU）的类SRAM接口设计}
+
+执行单元负责发起数据访存请求，包括load和store操作。与取指类似，EXE级发出访存请求，MEM级接收数据返回。引入类SRAM接口后，EXE级的控制逻辑需要做出相应调整。
+
+\begin{lstlisting}[language=Verilog]
+// Data SRAM-like interface
+output wire        data_sram_req,
+output wire        data_sram_wr,
+output wire [ 1:0] data_sram_size,
+output wire [31:0] data_sram_addr,
+output wire [ 3:0] data_sram_wstrb,
+output wire [31:0] data_sram_wdata,
+input  wire        data_sram_addr_ok,
+\end{lstlisting}
+
+与取指不同，数据访存的\texttt{size}信号需要根据访存指令的类型来确定。对于字节访存（\texttt{ld.b}、\texttt{st.b}），\texttt{size}为0；对于半字访存（\texttt{ld.h}、\texttt{st.h}），\texttt{size}为1；对于字访存（\texttt{ld.w}、\texttt{st.w}），\texttt{size}为2。具体实现如下：
+
+\begin{lstlisting}[language=Verilog]
+wire is_byte_op = (exe_mem_op == 4'd0) | (exe_mem_op == 4'd4) | 
+                  (exe_mem_op == 4'd8);  // ld.b, st.b, ld.bu
+wire is_half_op = (exe_mem_op == 4'd1) | (exe_mem_op == 4'd5) | 
+                  (exe_mem_op == 4'd9);  // ld.h, st.h, ld.hu
+wire is_word_op = (exe_mem_op == 4'd2) | (exe_mem_op == 4'd6);  
+                  // ld.w, st.w
+
+assign data_sram_size = is_byte_op ? 2'd0 :   // 1 byte
+                        is_half_op ? 2'd1 :   // 2 bytes
+                        is_word_op ? 2'd2 :   // 4 bytes
+                        2'd0;
+\end{lstlisting}
+
+对于写操作，\texttt{wstrb}信号需要根据访存地址的低两位和操作类型来生成。以字节写为例，如果地址低两位为\texttt{2'b00}，则\texttt{wstrb}为\texttt{4'b0001}；如果为\texttt{2'b01}，则\texttt{wstrb}为\texttt{4'b0010}，以此类推。写数据也需要根据地址低位进行对齐：
+
+\begin{lstlisting}[language=Verilog]
+assign data_sram_wstrb =   // st.b
+    (exe_mem_op == 4'd4) ?
+    ( addr0 ? 4'b0001 :
+      addr1 ? 4'b0010 :
+      addr2 ? 4'b0100 :
+      addr3 ? 4'b1000 :
+      4'b0000) :
+    // st.h and st.w ...
+    4'b0000;
+
+assign data_sram_wdata = // st.b
+    (exe_mem_op == 4'd4) ?
+    ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
+      addr1 ? {16'd0, exe_rkd_value[7:0],  8'd0} :
+      addr2 ? { 8'd0, exe_rkd_value[7:0], 16'd0} :
+      addr3 ? {       exe_rkd_value[7:0], 24'd0} :
+      32'd0 ) :
+    // st.h and st.w ...
+    32'd0;
+\end{lstlisting}
+
+在访存请求的控制方面，同样采用简化策略：仅当MEM级允许接收新指令时才发出访存请求。这样可以确保每次只有一个未完成的访存请求，简化了控制逻辑：
+
+\begin{lstlisting}[language=Verilog]
+wire   exe_mem_req;
+assign exe_mem_req = exe_res_from_mem | is_store;
+assign data_sram_req = exe_mem_req & exe_valid & mem_allowin;
+\end{lstlisting}
+
+EXE级的\texttt{ready\_go}信号需要考虑多个因素：乘除法等多周期操作的完成情况，以及访存请求是否被接收。只有当没有多周期操作正在执行，且访存请求已经被接收（或者不需要访存）时，EXE级才算完成：
+
+\begin{lstlisting}[language=Verilog]
+assign exe_ready_go = ~start_multicycle & ~multicycle_executing & 
+                      (~exe_mem_req | exe_mem_req & data_sram_addr_ok);
+\end{lstlisting}
+
+这里需要注意的是，store指令虽然不需要等待数据返回，但仍然需要等待地址请求被接收后才能进入MEM级。这是因为类SRAM接口中，\texttt{addr\_ok}对于写操作表示写地址和写数据均已被接收。
+
+在异常处理方面，需要考虑访存操作可能产生的地址对齐异常。对于半字访存，地址的最低位必须为0；对于字访存，地址的最低两位必须为00。如果不满足这些条件，需要产生地址对齐异常（ALE）：
+
+\begin{lstlisting}[language=Verilog]
+wire is_mem_op = (exe_mem_op != 4'd0);
+wire addr_align_error = is_mem_op & (
+    (is_half_op & exe_alu_result[0]) |        // Half-word: 2-byte aligned
+    (is_word_op & (|exe_alu_result[1:0]))     // Word: 4-byte aligned
+);
+
+wire        exe_gen_ex_valid = addr_align_error;
+wire [5:0]  exe_gen_ecode    = addr_align_error ? `ECODE_ALE : 6'd0;
+\end{lstlisting}
+
+当检测到地址对齐异常时，需要取消访存操作。这通过\texttt{exe\_multicycle\_ok}信号实现，该信号会检查是否存在异常或中断，只有在没有异常的情况下才允许执行访存操作：
+
+\begin{lstlisting}[language=Verilog]
+wire exe_multicycle_ok = exe_valid & 
+                         ~(mem_ex | wb_ex | exe_to_mem_ex_valid | 
+                           exe_to_mem_is_ertn);
+assign data_sram_wr = is_store & exe_multicycle_ok;
+\end{lstlisting}
+
+\subsubsection{访存单元（MEMU）的类SRAM接口设计}
+
+访存单元负责接收从EXE级传来的访存请求，并等待数据返回。在引入类SRAM接口后，MEM级需要增加对\texttt{data\_ok}信号的处理。首先，需要一个信号来标记当前指令是否需要等待数据返回，这个信号在EXE级传递到MEM级时确定：
+
+\begin{lstlisting}[language=Verilog]
+wire        mem_wait_data_ok;
+reg         mem_wait_data_ok_r;
+
+assign mem_wait_data_ok = mem_wait_data_ok_r & mem_valid & ~wb_ex;
+\end{lstlisting}
+
+这里\texttt{mem\_wait\_data\_ok\_r}是从EXE级传来的信号，表示该指令是load或store操作。\texttt{wb\_ex}是WB级传来的异常信号，如果WB级发生异常，则MEM级不需要再等待数据返回。
+
+MEM级的\texttt{ready\_go}信号需要考虑是否需要等待数据返回：
+
+\begin{lstlisting}[language=Verilog]
+assign mem_ready_go = ~mem_wait_data_ok | 
+                      mem_wait_data_ok & data_sram_data_ok;
+\end{lstlisting}
+
+只有当不需要等待数据返回，或者需要等待但已经收到\texttt{data\_ok}信号时，MEM级才算完成。
+
+特别需要注意的是，对于store指令，虽然不需要从\texttt{rdata}获取数据，但仍然需要等待\texttt{data\_ok}信号。这是因为如果store指令在MEM级不等待\texttt{data\_ok}就进入WB级，那么后续的load指令可能会误将store的\texttt{data\_ok}当作自己的数据返回信号，从而读取到错误的数据。
+
+\subsubsection{流水线valid信号的更新逻辑}
+
+在类SRAM接口下，流水线各级的\texttt{valid}信号更新逻辑也需要仔细设计。以MEM级为例，\texttt{mem\_valid}的更新需要遵循以下规则：只有当\texttt{mem\_allowin}为1时才接收新指令；如果\texttt{mem\_allowin}为0，则保持当前的\texttt{mem\_valid}值，让指令继续停留在MEM级。正确的实现如下：
+
+\begin{lstlisting}[language=Verilog]
+always @(posedge clk) begin
+    if (~resetn)
+        mem_valid <= 1'b0;
+    else if (flush)
+        mem_valid <= 1'b0;
+    else if (mem_allowin)
+        mem_valid <= exe_to_mem_valid;
+end
+\end{lstlisting}
+
+这里省略了\texttt{else}分支中的\texttt{mem\_valid <= mem\_valid}，因为这是默认行为。关键是不能写成\texttt{mem\_valid <= exe\_to\_mem\_valid \& mem\_allowin}，否则当\texttt{mem\_allowin}为0时，\texttt{mem\_valid}会被错误地清零，导致正在MEM级的指令消失。
+
+类似地，EXE级的\texttt{valid}信号更新也需要考虑多周期操作的情况：
+
+\begin{lstlisting}[language=Verilog]
+always @(posedge clk) begin
+    if (~resetn)
+        exe_valid <= 1'b0;
+    else if (flush)
+        exe_valid <= 1'b0;
+    else if (multicycle_executing | start_multicycle)
+        exe_valid <= 1'b1;
+    else if (exe_allowin)
+        exe_valid <= id_to_exe_valid;
+end
+\end{lstlisting}
+
+当多周期操作正在执行或刚开始执行时，需要保持\texttt{exe\_valid}为1；只有当\texttt{exe\_allowin}为1时才更新为新的\texttt{id\_to\_exe\_valid}值。
+
+\section{实验过程中遇到的问题}
+
+\subsection{流水线valid信号更新逻辑}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{fig/debug1.png}
+    \caption{EXE级valid信号更新错误的调试波形}
+    \label{fig:debug1}
+\end{figure}
+
+在最初的设计中，在EXEU模块中对\texttt{exe\_valid}信号的更新逻辑存在错误。原始代码如下：
+
+\begin{lstlisting}[language=Verilog]
+else if (multicycle_executing | (id_to_exe_valid & exe_allowin) | 
+         start_multicycle)
+    exe_valid <= 1'b1;
+else
+    exe_valid <= 1'b0;
+\end{lstlisting}
+
+当\texttt{exe\_allowin}为0且没有多周期操作时，\texttt{exe\_valid}会被无条件地设为0，这会导致当EXE级等待握手信号时，\texttt{valid}信号无法保持为1，使得\texttt{req}信号也未能维持至握手成功。
+
+修复后的代码如下：
+
+\begin{lstlisting}[language=Verilog]
+else if (multicycle_executing | start_multicycle)
+    exe_valid <= 1'b1;
+else if (exe_allowin)
+    exe_valid <= id_to_exe_valid;
+\end{lstlisting}
+
+类似的问题也出现在MEMU模块中，\texttt{mem\_valid}信号的更新逻辑存在严重错误。原始的错误代码如下：
+
+\begin{lstlisting}[language=Verilog]
+always @(posedge clk) begin
+    if (~resetn)
+        mem_valid <= 1'b0;
+    else if (flush)
+        mem_valid <= 1'b0;
+    else
+        mem_valid <= exe_to_mem_valid & mem_allowin;  // 错误！
+end
+\end{lstlisting}
+
+这段代码将\texttt{mem\_valid}的更新写成了\texttt{exe\_to\_mem\_valid \& mem\_allowin}，这意味着只要\texttt{mem\_allowin}为0（即WB级忙碌或MEM级本身还未准备好），\texttt{mem\_valid}就会被强制清零。这会导致正在MEM级处理的指令失效。
+
+在实际调试中，观察到这样的现象：连续两条\texttt{ld.w}指令，第一条能够正常写回，但第二条load指令在MEM级时被直接跳过，没有写回寄存器。通过波形分析，我们发现在第二条load指令进入MEM级后，由于WB级正忙于处理第一条load指令，\texttt{wb\_allowin}为0，导致\texttt{mem\_allowin}也为0。此时，错误的更新逻辑将\texttt{mem\_valid}清零，使得第二条load指令消失。
+
+正确的实现应该遵循流水线控制的基本原则：当\texttt{allowin}为0时，应该保持当前级的\texttt{valid}信号不变，让指令继续停留在当前级等待下一级空闲。修复后的代码如下：
+
+\begin{lstlisting}[language=Verilog]
+always @(posedge clk) begin
+    if (~resetn)
+        mem_valid <= 1'b0;
+    else if (flush)
+        mem_valid <= 1'b0;
+    else if (mem_allowin)
+        mem_valid <= exe_to_mem_valid;
+    // 否则保持原值（隐含的else: mem_valid <= mem_valid）
+end
+\end{lstlisting}
+
+
+\section{实验结果}
+
+经过对CPU设计的修改和调试，我们成功地将原有的SRAM接口改造为类SRAM总线接口。
+
+……
+
+\section{小组成员分工}
+
+王荦璠：负责exp14（类SRAM总线接口）的设计与实现，包括IFU、EXEU、MEMU等多个模块的修改，流水线控制逻辑的调整，以及相关问题的调试与修复。
+
+陈琛：
+
+张钧玮：
+
+\end{document}
