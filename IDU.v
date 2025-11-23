@@ -112,7 +112,7 @@ module IDU(
             id_valid <= 1'b0;
         else if (flush)
             id_valid <= 1'b0;
-        else if (br_taken)
+        else if (br_taken && !inst_bl && !inst_jirl)
             id_valid <= 1'b0;
         else if (id_allowin)
             id_valid <= if_to_id_valid;

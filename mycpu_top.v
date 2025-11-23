@@ -11,6 +11,7 @@ module mycpu_top
     output wire [1:0]  arburst,
     output wire [1:0]  arlock,
     output wire [3:0]  arcache,
+    output wire [2:0]  arprot,
     output wire        arvalid,
     input wire         arready,
     // R
@@ -87,7 +88,7 @@ module mycpu_top
     // CSR interface
     wire [31:0] csr_ex_entry;
     wire [31:0] csr_era;
-    wire        csr_has_int;
+    wire        has_int;
     wire        csr_re;
     wire [13:0] csr_num;
     wire [31:0] csr_rvalue;
@@ -141,6 +142,7 @@ module mycpu_top
         .arburst           (arburst[1:0]),
         .arlock            (arlock[1:0]),
         .arcache           (arcache[3:0]),
+        .arprot            (arprot[2:0]),
         .arvalid           (arvalid),
         .rready            (rready),
         .awid              (awid[3:0]),
@@ -303,7 +305,7 @@ module mycpu_top
         .coreid_in                (32'd0), // Core ID, can be customized
         .ex_entry                 (csr_ex_entry),
         .era                      (csr_era),
-        .has_int                  (csr_has_int),
+        .has_int                  (has_int),
         .ertn_flush               (wb_is_ertn),
         .wb_ex                    (wb_ex_valid),
         .wb_pc                    (wb_ex_pc),
