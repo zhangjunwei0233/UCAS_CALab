@@ -77,9 +77,11 @@ module bridge
 `define S_B    5'b10000
 
     reg [4:0] state;
-    reg [1:0] wready_buf; // Wait for both awready and wready
-    
-    reg         grant;
+    reg [1:0] wready_buf; // Track AW and W handshakes
+    reg       grant;      // 0 = inst, 1 = data
+    reg       last_grant; // For round-robin when both request
+
+    // Shortcut arrays for the two masters
     wire        sram_req   [1:0];
     wire        sram_wr    [1:0];
     wire [ 1:0] sram_size  [1:0];
@@ -98,6 +100,22 @@ module bridge
     assign sram_wstrb[1] = data_sram_wstrb;
     assign sram_wdata[0] = inst_sram_wdata;
     assign sram_wdata[1] = data_sram_wdata;
+
+    // Handshake detection
+    wire ar_hs, aw_hs, w_hs, b_hs, r_hs;
+    wire aw_done, w_done;
+    wire aw_done_next, w_done_next;
+    assign aw_done      = wready_buf[0];
+    assign w_done       = wready_buf[1];
+    assign ar_hs        = (state == `S_AR) && sram_req[grant] && arready;
+    assign aw_hs        = (state == `S_AW) && sram_req[grant] && awready && !aw_done;
+    assign w_hs         = (state == `S_AW) && sram_req[grant] && wready  && !w_done;
+    assign b_hs         = (state == `S_B)  && bvalid;
+    assign r_hs         = (state == `S_R)  && rvalid;
+    assign aw_done_next = aw_done | aw_hs;
+    assign w_done_next  = w_done  | w_hs;
+
+    // Master-visible handshakes
     wire        sram_addr_ok;
     wire        sram_data_ok;
     wire [31:0] sram_rdata;
@@ -107,79 +125,105 @@ module bridge
     assign data_sram_data_ok = (grant == 1'b1) && sram_data_ok;
     assign inst_sram_rdata   = sram_rdata;
     assign data_sram_rdata   = sram_rdata;
-    
+
     always @(posedge aclk) begin
         if (!aresetn) begin
-            state <= `S_IDLE;
+            state      <= `S_IDLE;
             wready_buf <= 2'b00;
+            grant      <= 1'b0;
+            last_grant <= 1'b1; // so first tie-break favors inst (0)
         end else begin
             case (1'b1)
               state[0]: begin
-                  // Idle
+                  // Idle: pick next request with simple round-robin to avoid starvation
                   wready_buf <= 2'b00;
-                  if (sram_req[1]) begin
-                      grant <= 1'b1;
-                      state <= sram_wr[1] ? `S_AW : `S_AR;
+                  if (sram_req[0] && sram_req[1]) begin
+                      // Both asserted: alternate
+                      grant <= ~last_grant;
+                      state <= sram_wr[~last_grant] ? `S_AW : `S_AR;
                   end else if (sram_req[0]) begin
                       grant <= 1'b0;
                       state <= sram_wr[0] ? `S_AW : `S_AR;
+                  end else if (sram_req[1]) begin
+                      grant <= 1'b1;
+                      state <= sram_wr[1] ? `S_AW : `S_AR;
                   end
               end
               state[1]: begin
                   // AR
-                  if (sram_addr_ok) state <= `S_R;
+                  if (!sram_req[grant]) begin
+                      state <= `S_IDLE;          // cancelled before addr_ok
+                  end else if (ar_hs) begin
+                      state <= `S_R;
+                  end
               end
               state[2]: begin
                   // R
-                  if (sram_data_ok) state <= `S_IDLE;
+                  if (r_hs) state <= `S_IDLE;
               end
               state[3]: begin
-                  // AW
-                  if (awready) wready_buf[0] <= 1'b1;
-                  if (wready)  wready_buf[1] <= 1'b1;
-                  if (sram_addr_ok) state <= `S_B;
+                  // AW/W
+                  if (!sram_req[grant]) begin
+                      wready_buf <= 2'b00;
+                      state <= `S_IDLE;          // cancelled before addr_ok
+                  end else begin
+                      if (aw_hs) wready_buf[0] <= 1'b1;
+                      if (w_hs)  wready_buf[1] <= 1'b1;
+                      if (aw_done_next && w_done_next) begin
+                          wready_buf <= 2'b00;
+                          state <= `S_B;
+                      end
+                  end
               end
               state[4]: begin
                   // B
-                  if (sram_data_ok) state <= `S_IDLE;
+                  if (b_hs) state <= `S_IDLE;
               end
             endcase
+
+            // Remember last granted master when a request is accepted
+            if (sram_addr_ok)
+                last_grant <= grant;
         end
     end
-    assign sram_addr_ok = (state[1] && arready) ||
-                          (state[3] && (awready || wready_buf[0]) && (wready || wready_buf[1]));
-    assign sram_data_ok = (state[2] && rvalid) ||
-                          (state[4] && bvalid);
-    assign sram_rdata = rdata;
 
-    assign arid    = {2'b00, grant};
+    assign sram_addr_ok = ar_hs | (aw_done_next & w_done_next);
+    assign sram_data_ok = r_hs | b_hs;
+    assign sram_rdata   = rdata;
+
+    // AR channel
+    assign arid    = {3'b000, grant};
     assign araddr  = sram_addr[grant];
     assign arlen   = 8'b0;
-    assign arsize  = 3'b100;
+    assign arsize  = {1'b0, sram_size[grant]}; // map 1/2/4-byte to AXI size
     assign arburst = 2'b01;
     assign arlock  = 2'b00;
     assign arcache = 4'b0000;
     assign arprot  = 3'b000;
-    assign arvalid = (state == `S_AR);
+    assign arvalid = (state == `S_AR) && sram_req[grant];
 
+    // R channel
     assign rready  = (state == `S_R);
 
-    assign awid    = {2'b00, grant};
+    // AW channel
+    assign awid    = {3'b000, grant};
     assign awaddr  = sram_addr[grant];
     assign awlen   = 8'b0;
-    assign awsize  = 3'b100;
+    assign awsize  = {1'b0, sram_size[grant]};
     assign awburst = 2'b01;
     assign awlock  = 2'b00;
     assign awcache = 4'b0000;
     assign awprot  = 3'b000;
-    assign awvalid = (state == `S_AW) && !wready_buf[0];
+    assign awvalid = (state == `S_AW) && !aw_done && sram_req[grant];
 
-    assign wid     = {2'b00, grant};
+    // W channel
+    assign wid     = {3'b000, grant};
     assign wdata   = sram_wdata[grant];
     assign wstrb   = sram_wstrb[grant];
-    assign wlast   = (state == `S_AW) && !wready_buf[1];
-    assign wvalid  = (state == `S_AW) && !wready_buf[1];
+    assign wlast   = 1'b1;
+    assign wvalid  = (state == `S_AW) && !w_done && sram_req[grant];
 
+    // B channel
     assign bready  = (state == `S_B);
     
 endmodule
