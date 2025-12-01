@@ -127,7 +127,16 @@
 
 除了基本的握手机制外，还需要特别处理两种情况：一是当指令已经取回但由于下一级流水阻塞而无法进入时，需要设置指令缓存来保存这些指令；二是当发生异常清空流水线时，已发出但尚未完成的请求所返回的数据需要被正确丢弃，以避免将错误的指令或数据引入流水线。
 
+在完成了类SRAM接口的CPU设计基础上，额外添加一个类SRAM-AXI转接桥，用于将CPU的两个类SRAM接口连接到AXI接口。除了完成通信协议的转换外，转接桥还需要对传入的类SRAM请求进行仲裁。为了简化设计，读请求和写请求不能并行进行，即便它们使用不同的通道。
+
 \subsection{处理器结构设计框图}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{fig/CPU_arch_prj5.jpg}
+    \caption{处理器结构设计框图}
+    \label{fig:CPU_arch_prj5}
+\end{figure}
 
 \subsection{关键设计模块}
 
@@ -392,6 +401,91 @@ end
 
 当多周期操作正在执行或刚开始执行时，需要保持\texttt{exe\_valid}为1；只有当\texttt{exe\_allowin}为1时才更新为新的\texttt{id\_to\_exe\_valid}值。
 
+\subsubsection{类SRAM-AXI转接桥设计}
+
+在类SRAM-AXI转接桥中，需要实现以下两个功能：
+
+\begin{itemize}
+    \item 对CPU发出的取指请求和访存请求进行仲裁，确保至多只同时处理一个请求；
+
+    \item 将CPU使用的类SRAM总线连接至AXI总线。
+\end{itemize}
+
+在本次设计中，使用了一个单独的状态机来实现整个转接桥，状态转移图如下。以下分别对于每个状态的工作进行分析：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{fig/bridge_state.png}
+    \caption{转接桥状态转移图}
+    \label{fig:bridge_state}
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{S_IDLE}
+      S_IDLE状态等待处理器发起请求。其中，\texttt{grant}信号标记当前正在处理的请求（0为取指，1为访存，下同），\texttt{last_grant}信号标记上次处理的请求。如果两个请求同时有效，则使用Round Robin的方式防止出现饥饿。同时，在S_IDLE状态需要根据请求为读请求或写请求，分别跳转至S_AR状态或S_AW状态。
+
+\begin{lstlisting}[language=Verilog]
+if (sram_req[0] && sram_req[1]) begin
+    // Both asserted: alternate
+    grant <= ~last_grant;
+    state <= sram_wr[~last_grant] ? `S_AW : `S_AR;
+end else if (sram_req[0]) begin
+    grant <= 1'b0;
+    state <= sram_wr[0] ? `S_AW : `S_AR;
+end else if (sram_req[1]) begin
+    grant <= 1'b1;
+    state <= sram_wr[1] ? `S_AW : `S_AR;
+end
+\end{lstlisting}
+
+    \item S_AR状态负责处理读地址的发送。其中需要注意的是，类SRAM接口支持在握手发生之前取消当前请求，若请求取消，则回到S_IDLE状态。AR通道的握手状态通过信号\texttt{ar_hs = (state == `S_AR) \&\& sram_req[grant] \&\& arready}追踪，若握手成功则进入S_R状态。
+
+    \item S_R状态负责处理读数据的接收，只需通过\texttt{r_hs = (state == `S_R) \&\& rvalid}追踪握手状态，在握手成功后回到S_IDLE状态即可。
+
+    \item S_AW状态负责处理写地址和写数据的发送。除了要考虑握手前的请求取消以外，由于要处理两个通道的握手，此处引入了寄存器\texttt{wready_buf}用于分别追踪两个通道的握手情况。
+
+\begin{lstlisting}[language=Verilog]
+reg [1:0] wready_buf; // Track AW and W handshakes
+wire aw_done, w_done;
+wire aw_done_next, w_done_next;
+assign aw_done      = wready_buf[0];
+assign w_done       = wready_buf[1];
+assign aw_hs        = (state == `S_AW) && sram_req[grant] && awready && !aw_done;
+assign w_hs         = (state == `S_AW) && sram_req[grant] && wready  && !w_done;
+assign aw_done_next = aw_done | aw_hs;
+assign w_done_next  = w_done  | w_hs;
+\end{lstlisting}
+
+      其中，\texttt{aw_done}和\texttt{w_done}信号用于记录两个通道是否\textbf{已经}完成握手，\texttt{aw_hs}和\texttt{w_hs}用于记录两个通道\textbf{在当前这一拍}是否\textbf{正在}握手。只有当两个通道在当前这一拍都握手成功了，才可以进入S_B状态。
+
+\begin{lstlisting}[language=Verilog]
+if (!sram_req[grant]) begin
+    wready_buf <= 2'b00;
+    state <= `S_IDLE;          // cancelled before addr_ok
+end else begin
+    if (aw_hs) wready_buf[0] <= 1'b1;
+    if (w_hs)  wready_buf[1] <= 1'b1;
+    if (aw_done_next && w_done_next) begin
+        wready_buf <= 2'b00;
+        state <= `S_B;
+    end
+end
+\end{lstlisting}
+
+    \item S_B状态用来处理写请求的返回，和S_R类似，只需通过\texttt{b_hs = (state == `S_B) \&\& bvalid}追踪握手状态，在握手成功后回到S_IDLE状态即可。
+
+\end{itemize}
+
+在核心状态机设计完毕后，便可以根据当前状态设置相应的握手信号值。需要注意\texttt{awvalid}信号和\texttt{wvalid}信号只有在握手还未成功时拉高，避免出现重复握手的情况。
+
+\begin{lstlisting}[language=Verilog]
+assign arvalid = (state == `S_AR) && sram_req[grant];
+assign rready  = (state == `S_R);
+assign awvalid = (state == `S_AW) && !aw_done && sram_req[grant];
+assign wvalid  = (state == `S_AW) && !w_done && sram_req[grant];
+assign bready  = (state == `S_B);
+\end{lstlisting}
+
 \section{实验过程中遇到的问题}
 
 \subsection{流水线valid信号更新逻辑}
@@ -458,15 +552,13 @@ end
 
 \section{实验结果}
 
-经过对CPU设计的修改和调试，我们成功地将原有的SRAM接口改造为类SRAM总线接口。
-
-……
+经过对CPU设计的修改和调试，我们成功地将原有的SRAM接口改造为类SRAM总线接口。将类SRAM接口的CPU与转接桥连接，实现了CPU通过AXI总线对内存的访问，并通过了固定延迟和随机延迟测试。
 
 \section{小组成员分工}
 
 王荦璠：负责exp14（类SRAM总线接口）的设计与实现，包括IFU、EXEU、MEMU等多个模块的修改，流水线控制逻辑的调整，以及相关问题的调试与修复。
 
-陈琛：
+陈琛：负责类SRAM-AXI转接桥的部分实现。
 
 张钧玮：
 
