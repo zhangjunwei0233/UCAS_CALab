@@ -549,6 +549,25 @@ always @(posedge clk) begin
 end
 \end{lstlisting}
 
+\subsection{br_taken信号导致的数据请求饥饿问题}
+
+在最初的设计中，转接桥中没有仲裁机制，在数据请求的优先级高于指令请求的时候，可以通过测试。但在指令请求的优先级高的时候，仿真会阻塞在pc=0x1c032e40的位置。
+
+简单分析发现，此时EX级与IF级同时向转接桥发送请求。由于指令请求的优先级高，故转接桥会选择指令请求处理。但是问题出在IF级一直在循环向转接桥发送同一个指令请求，导致转接桥循环处理同样的指令请求，使得数据请求饥饿。
+
+理想情况下，当pre-IF级的指令请求接收到 addr_ok 信号后,指令就应该进入IF级并将IF级的valid信号置1。由于后续的流水线级已经陷入阻塞，故IF级也会陷入阻塞，使得if_allowin信号拉低，此时pre-IF级便不再继续发送请求。
+
+但是\ref{fig:debug2}中的信号显示 if_allowin 信号只被拉高了一拍。原因是此时阻塞在ID级的恰好是一条 br_taken 的分支指令，导致 if_cancel 信号被拉高。取来的指令在存留一拍之后就被取消，导致IF认为自己仍空，促使pre-IF级反复发送同一请求，陷入循环。
+
+在本次实验中，我们采取了简单的修复措施：在转接桥中加入一个简单的 Round Robin 仲裁机制，从而避免数据请求的饥饿。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{fig/debug2.png}
+    \caption{数据请求饥饿的调试波形}
+    \label{fig:debug2}
+\end{figure}
+
 
 \section{实验结果}
 
@@ -560,6 +579,6 @@ end
 
 陈琛：负责类SRAM-AXI转接桥的部分实现。
 
-张钧玮：
+张钧玮：完善类SRAM-AXI转接桥，使之支持请求的更改与取消，并添加仲裁机制。
 
 \end{document}
