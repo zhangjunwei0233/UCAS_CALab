@@ -136,7 +136,7 @@ module bridge
             case (1'b1)
               state[0]: begin
                   // Idle: pick next request with simple round-robin to avoid starvation
-                  wready_buf <= 2'b00;
+                  // wready_buf <= 2'b00;
                   if (sram_req[0] && sram_req[1]) begin
                       // Both asserted: alternate
                       grant <= ~last_grant;
@@ -170,13 +170,13 @@ module bridge
                       if (aw_hs) wready_buf[0] <= 1'b1;
                       if (w_hs)  wready_buf[1] <= 1'b1;
                       if (aw_done_next && w_done_next) begin
-                          wready_buf <= 2'b00;
                           state <= `S_B;
                       end
                   end
               end
               state[4]: begin
                   // B
+                  wready_buf <= 2'b00;
                   if (b_hs) state <= `S_IDLE;
               end
             endcase
