@@ -12,6 +12,7 @@ module IDU(
     // Pipeline interface with IF stage
     output wire        id_allowin,
     input  wire        if_to_id_valid,
+    output wire        br_stall,
     output wire        br_taken,
     output wire [31:0] br_target,
     input  wire [`IF2ID_LEN - 1:0] if_to_id_zip,
@@ -104,13 +105,14 @@ module IDU(
     assign id_stall = ((exe_res_from_mem | exe_from_csr) & ((conflict_r1_exe & need_r1) | (conflict_r2_exe & need_r2))) |
                       ((mem_res_from_mem | mem_from_csr) & ((conflict_r1_mem & need_r1) | (conflict_r2_mem & need_r2))) |
                       ((wb_from_csr)                     & ((conflict_r1_wb  & need_r1) | (conflict_r2_wb  & need_r2)));
+    assign br_stall = id_stall & ty_B;
 
     always @(posedge clk) begin
         if (~resetn)
             id_valid <= 1'b0;
         else if (flush)
             id_valid <= 1'b0;
-        else if (br_taken)
+        else if (br_taken && !inst_bl && !inst_jirl)
             id_valid <= 1'b0;
         else if (id_allowin)
             id_valid <= if_to_id_valid;
@@ -134,7 +136,7 @@ module IDU(
                        (inst_bge  & ~rj_lt_rd ) |
                        (inst_bltu &  rj_ltu_rd) |
                        (inst_bgeu & ~rj_ltu_rd) |
-                       inst_jirl | inst_bl | inst_b) & id_valid;
+                       inst_jirl | inst_bl | inst_b) & id_valid & ~br_stall;
     assign br_target = (ty_B & ~inst_jirl) ? (id_pc + br_offs) :
                        (rj_value + jirl_offs);
 
