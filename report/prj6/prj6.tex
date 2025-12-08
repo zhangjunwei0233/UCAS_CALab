@@ -1,0 +1,387 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper]{geometry}
+\geometry{left=2.0cm,right=2.0cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{ctex} % 支持中文的LaTeX宏包
+\usepackage{amsmath,amsfonts,graphicx,amssymb,bm,amsthm,mathrsfs,mathtools,breqn} % 数学公式和符号的宏包集合
+\usepackage{algorithm,algorithmicx} % 算法和伪代码
+\usepackage[noend]{algpseudocode} % 算法和伪代码
+\usepackage{fancyhdr} % 自定义页眉页脚
+\usepackage[framemethod=TikZ]{mdframed} % 创建带边框的框架
+\usepackage{fontspec} % 字体设置
+\usepackage{adjustbox} % 调整盒子大小
+\usepackage{fontsize} % 设置字体大小
+\usepackage{tikz,xcolor} % 绘制图形和使用颜色
+\usepackage{multicol} % 多栏排版
+\usepackage{multirow} % 表格中合并单元格
+\usepackage{pdfpages} % 插入PDF文件
+\usepackage{listings} % 在文档中插入源代码
+\usepackage{wrapfig} % 文字绕排图片
+\usepackage{bigstrut,multirow,rotating} % 支持在表格中使用特殊命令
+\usepackage{booktabs} % 创建美观的表格
+\usepackage{circuitikz} % 绘制电路图
+\usepackage{zhnumber} % 中文序号（用于标题）
+\usepackage{tabularx} % 表格折行
+\usepackage{float} % 图片插入
+\usepackage{longtable} % 长表格
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+\lstset{
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=fixed,
+  framerule=1pt,
+  rulecolor=\color{gray!35},
+  backgroundcolor=\color{gray!5},
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+}
+
+% 轻松引用, 可以用\cref{}指令直接引用, 自动加前缀. 
+% 例: 图片label为fig:1
+% \cref{fig:1} => Figure.1
+% \ref{fig:1}  => 1
+\usepackage[capitalize]{cleveref}
+% \crefname{section}{Sec.}{Secs.}
+\Crefname{section}{Section}{Sections}
+\Crefname{table}{Table}{Tables}
+\crefname{table}{Table.}{Tabs.}
+
+% \setmainfont{Palatino Linotype.ttf}
+% \setCJKmainfont{SimHei.ttf}
+% \setCJKsansfont{Songti.ttf}
+% \setCJKmonofont{SimSun.ttf}
+\punctstyle{kaiming}
+% 偏好的几个字体, 可以根据需要自行加入字体ttf文件并调用
+
+\renewcommand{\emph}[1]{\begin{kaishu}#1\end{kaishu}}
+
+% 对 section 等环境的序号使用中文
+\renewcommand \thesection{\zhnum{section}、}
+\renewcommand \thesubsection{\arabic{subsection}}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%改这里可以修改实验报告表头的信息
+\newcommand{\name}{陈琛、王荦璠、张钧玮}
+\newcommand{\studentNum}{80}
+\newcommand{\major}{计算机科学与技术}
+\newcommand{\labNum}{6}
+\newcommand{\labName}{TLB MMU设计专题}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\begin{center}
+  \LARGE \bf 中国科学院大学 \\《计算机体系结构（研讨课）》实验报告
+\end{center}
+
+\begin{center}
+  \emph{姓名} \underline{\makebox[12em][c]{\name}} 
+  \emph{箱子号} \underline{\makebox[7em][c]{\studentNum}}
+  \emph{专业} \underline{\makebox[15em][c]{\major}}\\
+  \emph{实验项目编号} \underline{\makebox[3em][c]{\labNum}}
+  \emph{实验名称} \underline{\makebox[30em][c]{\labName}}\\
+\end{center}
+
+\section{实验任务}
+
+本次实验是TLB MMU设计专题，包含三个递进式的实践任务。实验的总体目标是为CPU添加存储管理单元（MMU）功能，支持虚实地址转换，实现虚拟内存管理。工作划分为三个阶段：首先设计TLB模块，然后将TLB模块集成到CPU中并添加TLB相关指令和CSR寄存器，最后添加TLB相关异常支持并完善MMU功能。
+
+\begin{itemize}
+    \item \textbf{实践任务17：TLB模块设计}
+    
+    设计TLB（Translation Lookaside Buffer）模块，这是MMU的核心组件，用于缓存虚拟地址到物理地址的映射关系。TLB采用全相联结构，支持双页结构（奇偶页），每个表项包含虚拟页号（VPPN）、物理页号（PPN）、页大小（PS）、地址空间标识符（ASID）等信息。需要实现TLB的查找、读、写和无效化操作，并提供取指和访存两个独立的查找端口以支持流水线同时查找。完成后利用TLB模块级验证环境对所设计的TLB进行验证，通过仿真和上板验证。
+    
+    \item \textbf{实践任务18：添加TLB相关指令和CSR寄存器}
+    
+    本实践任务要求在实践任务16（AXI总线接口设计）和实践任务17的基础上完成以下工作：将实践任务17完成的TLB模块集成到实践任务16完成的CPU中，在CPU中增加TLBSRCH、TLBRD、TLBWR、TLBFILL、INVTLB五条TLB相关指令的支持，在CPU中增加TLBIDX、TLBEHI、TLBELO0、TLBELO1、ASID、TLBRENTRY六个TLB相关的CSR寄存器。完成后在采用AXI总线的SoC验证环境里完成exp18对应func的功能验证，要求成功通过仿真和上板验证。
+    
+    \item \textbf{实践任务19：添加TLB相关例外支持}
+    
+    本实践任务要求在实践任务18所实现CPU的基础上完成以下工作：为CPU增加TLB相关异常，包括TLB重填例外、load/store/取指操作页无效例外、页修改例外、页特权等级不合规例外；在CPU中增加DMW CSR寄存器；为CPU增加虚实地址映射的功能。完成后在采用AXI总线的SoC验证环境里完成exp19对应func的功能验证，要求成功通过仿真和上板验证。
+\end{itemize}
+
+\section{设计详细分析}
+
+\subsection{TLB模块设计（exp17）}
+
+\subsection{TLB相关指令和CSR寄存器（exp18）}
+
+exp18的关键在于正确处理TLB指令在流水线中的执行时机、CSR寄存器与TLB模块之间的数据交互，以及维护流水线各级间打包传递的信号完整性。
+
+TLB模块本身在exp17中已经完成设计和验证，它提供了两个独立的查找端口（用于取指和访存）、一个写端口（用于TLBWR和TLBFILL指令）、一个读端口（用于TLBRD指令）以及INVTLB操作的支持。
+
+参考教材中的方案，我们遵循以下基本原则：TLB查找操作在EXE级进行（TLBSRCH指令），TLB写入和读取操作在WB级进行（TLBWR、TLBFILL、TLBRD指令），INVTLB操作在EXE级触发并直接作用于TLB模块。CSR寄存器作为TLB操作的接口，需要在适当的时机更新其内容。
+
+\subsubsection{TLB相关指令的译码}
+
+在IDU模块中，首先对五条TLB指令进行译码：
+
+\begin{lstlisting}[language=Verilog]
+// TLB related instructions (direct bit-pattern match)
+wire inst_tlbsrch = (inst[31:10] == 22'b0000011001001000001010) && (inst[9:0]  == 10'b0);
+wire inst_tlbrd   = (inst[31:10] == 22'b0000011001001000001011) && (inst[9:0]  == 10'b0);
+wire inst_tlbwr   = (inst[31:10] == 22'b0000011001001000001100) && (inst[9:0]  == 10'b0);
+wire inst_tlbfill = (inst[31:10] == 22'b0000011001001000001101) && (inst[9:0]  == 10'b0);
+wire inst_invtlb  = (inst[31:15] == 17'b00000110010010011);
+\end{lstlisting}
+
+为了在流水线中传递TLB操作类型，我们定义了一个3位的tlb\_op信号来统一标识五种TLB操作，并单独传递5位的invtlb\_op信号用于INVTLB指令的操作码。
+
+\begin{lstlisting}[language=Verilog]
+wire [2:0] id_tlb_op = inst_tlbsrch ? `TLB_OP_SRCH :
+                       inst_tlbrd   ? `TLB_OP_RD   :
+                       inst_tlbwr   ? `TLB_OP_WR   :
+                       inst_tlbfill ? `TLB_OP_FILL :
+                       inst_invtlb  ? `TLB_OP_INV  : `TLB_OP_NONE;
+wire [4:0] id_invtlb_op = inst[4:0];
+\end{lstlisting}
+
+INVTLB指令的操作码op只有0到6共7种合法取值，对于op大于6的情况，根据LoongArch规范应当触发指令不存在异常。因此在译码阶段需要检查这一非法情况，将invtlb\_illegal信号纳入到指令不存在异常的检测逻辑中。
+
+\begin{lstlisting}[language=Verilog]
+wire invtlb_illegal = inst_invtlb & (inst[4:0] > 5'd6);
+
+// Exception detection
+wire id_ex_ine = (~inst_known | invtlb_illegal) & id_valid;
+\end{lstlisting}
+
+TLB指令不写通用寄存器（TLBSRCH虽然会更新TLBIDX寄存器，但那是通过CSR机制完成的），因此在生成寄存器写使能信号时需要将它们全部排除。
+
+\begin{lstlisting}[language=Verilog]
+assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_break | inst_ertn |
+                 inst_tlbsrch | inst_tlbrd | inst_tlbwr | inst_tlbfill | inst_invtlb)
+               & id_valid & ~id_ex_valid;
+\end{lstlisting}
+
+INVTLB指令的rj和rk操作数用于提供虚拟地址和ASID信息，因此需要在数据相关检测中将inst\_invtlb纳入need\_r1和need\_r2的条件判断，确保数据前递逻辑能够正确处理INVTLB指令的操作数相关。
+
+\begin{lstlisting}[language=Verilog]
+assign need_r1 = (~src1_is_pc & (|alu_op)) | inst_invtlb;
+assign need_r2 = (~src2_is_imm & ((|alu_op[11:0]) | ty_MD)) | inst_invtlb;
+\end{lstlisting}
+
+\subsubsection{TLBSRCH指令的实现}
+
+TLBSRCH指令在EXE级执行，它使用CSR.ASID和CSR.TLBEHI的VPPN字段去查询TLB，如果有命中项则将命中项的索引值写入CSR.TLBIDX的Index域并将NE位置为0，如果没有命中项则将NE位置为1。这个指令的特殊之处在于它需要在EXE级就完成CSR的更新，而不是等到WB级。在EXEU模块中，我们复用TLB模块的search port 1（原本用于访存的查找端口）来执行TLBSRCH的查找操作，同时也用于INVTLB指令的条件匹配。由于TLB的查找是组合逻辑，只需要在当前周期提供正确的查找输入，TLB就会在同一周期给出查找结果。
+
+\begin{lstlisting}[language=Verilog]
+// TLB search / INVTLB interface (port 1)
+assign tlb_s1_vppn    = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
+                        (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] : 19'd0;
+assign tlb_s1_va_bit12= (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0 :
+                        (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] : 1'b0;
+assign tlb_s1_asid    = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
+                        (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] : 10'd0;
+\end{lstlisting}
+
+TLB模块返回的查找结果通过tlb\_s1\_found和tlb\_s1\_index信号传递，我们在EXEU模块内部直接使用这些组合逻辑信号生成CSR写入的值。
+
+\begin{lstlisting}[language=Verilog]
+// CSR value adjustment for TLB search
+wire [31:0] tlbsrch_wvalue = {~tlb_s1_found, 7'd0, 20'd0, tlb_s1_index};
+wire [31:0] tlbsrch_wmask  = 32'h8000_000f;
+wire [13:0] exe_csr_num_final    = (exe_tlb_op == `TLB_OP_SRCH) ? `CSR_TLBIDX : exe_csr_num;
+wire        exe_csr_we_final     = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b1        : exe_csr_we;
+wire        exe_csr_read_final   = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0        : exe_csr_read;
+wire [31:0] exe_csr_wmask_final  = (exe_tlb_op == `TLB_OP_SRCH) ? tlbsrch_wmask : exe_csr_wmask;
+wire [31:0] exe_csr_wvalue_final = (exe_tlb_op == `TLB_OP_SRCH) ? tlbsrch_wvalue : exe_csr_wvalue;
+\end{lstlisting}
+
+这些经过调整的CSR写入信号会随着流水线传递到WB级，然后再由WBU模块提交到CSR模块。这样TLBSRCH指令就能够在EXE级完成TLB查找，在WB级完成CSR更新，整个过程符合流水线的设计原则。
+
+\subsubsection{INVTLB指令的实现}
+
+INVTLB指令用于无效化TLB中的表项，它有7种操作类型（op从0到6）。这个指令在EXE级触发，并直接作用于TLB模块。TLB模块内部会根据invtlb\_op和查找端口1提供的VPPN、ASID等信息，在同一周期内将符合条件的TLB表项的E位清零。在EXEU模块中，我们在exe\_to\_mem\_valid有效且exe\_tlb\_op为TLB\_OP\_INV时将tlb\_invtlb\_valid信号置为1，同时将exe\_invtlb\_op传递给TLB模块。
+
+\begin{lstlisting}[language=Verilog]
+assign tlb_invtlb_op  = exe_invtlb_op;
+assign tlb_invtlb_valid = exe_to_mem_valid & (exe_tlb_op == `TLB_OP_INV);
+\end{lstlisting}
+
+\subsubsection{TLBRD、TLBWR、TLBFILL指令的实现}
+
+TLBRD、TLBWR、TLBFILL三条指令都在WB级执行，它们通过CSR寄存器作为接口来读写TLB表项。WBU模块负责协调这些指令的执行。TLBWR和TLBFILL指令将CSR中的信息写入TLB表项，两者的区别在于写入的索引来源不同：TLBWR使用CSR.TLBIDX.Index指定的索引，而TLBFILL使用一个硬件维护的轮转计数器tlb\_fill\_ptr。这个轮转计数器在每次执行TLBFILL指令时自动加1，从而实现简单的轮转替换策略。
+
+\begin{lstlisting}[language=Verilog]
+// TLBFILL round-robin pointer
+reg  [3:0]  tlb_fill_ptr;
+
+always @(posedge clk) begin
+    if (~resetn)
+        tlb_fill_ptr <= 4'd0;
+    else if (wb_do_tlbfill)
+        tlb_fill_ptr <= tlb_fill_ptr + 1'b1;
+end
+\end{lstlisting}
+
+TLB表项的各个字段从CSR寄存器中提取，包括E位、VPPN、PS、ASID、G位以及两个页面的PPN、PLV、MAT、D、V等信息。需要特别注意的是，G位（Global标志）的处理比较特殊：只有当TLBELO0和TLBELO1的G位都为1时，写入TLB的表项的G位才为1。这是因为TLB表项包含两个物理页（奇偶页），只有两个页都是全局页时，整个表项才是全局的。
+
+\begin{lstlisting}[language=Verilog]
+wire tlbelo0_g     = csr_tlbelo0_value[`CSR_TLBELO_G];
+wire tlbelo1_g     = csr_tlbelo1_value[`CSR_TLBELO_G];
+wire tlb_w_g_int   = tlbelo0_g & tlbelo1_g;
+\end{lstlisting}
+
+TLBWR和TLBFILL指令的TLB写入控制信号由wb\_do\_tlbwr和wb\_do\_tlbfill信号驱动，这两个信号都要求wb\_forward\_ok有效，即WB级有效且没有异常或ERTN。
+
+\begin{lstlisting}[language=Verilog]
+// TLB helper signals
+wire wb_do_tlbrd   = wb_forward_ok & (wb_tlb_op == `TLB_OP_RD);
+wire wb_do_tlbwr   = wb_forward_ok & (wb_tlb_op == `TLB_OP_WR);
+wire wb_do_tlbfill = wb_forward_ok & (wb_tlb_op == `TLB_OP_FILL);
+\end{lstlisting}
+
+TLB写入端口的控制信号tlb\_we由这两个信号的或逻辑生成，写入索引tlb\_w\_index根据操作类型在轮转计数器和CSR.TLBIDX.Index之间选择。
+
+\begin{lstlisting}[language=Verilog]
+// TLB write / read control
+assign csr_tlbrd_en = wb_do_tlbrd;
+assign tlb_we       = wb_do_tlbwr | wb_do_tlbfill;
+assign tlb_w_index  = (wb_tlb_op == `TLB_OP_FILL) ? tlb_fill_ptr : csr_tlbidx_index;
+assign tlb_w_e      = ~csr_tlbidx_ne;
+\end{lstlisting}
+
+TLBRD指令从TLB读取表项并将结果写入CSR寄存器。TLB模块的读端口是组合逻辑，根据r\_index输入（连接到csr\_tlbidx\_index）直接给出读结果。在WB级触发TLBRD时，WBU模块将csr\_tlbrd\_en信号置为1，CSR模块接收到这个信号后会在下一个时钟周期更新TLBIDX、TLBEHI、TLBELO0、TLBELO1、ASID等寄存器。这里有一个重要的规范要求：如果读取的TLB表项无效（E位为0），应当将这些CSR清零并将TLBIDX.NE置为1。因此在CSR模块的always块中，需要对tlbrd\_r\_e信号进行判断，当其为0时将所有相关CSR字段清零。
+
+\begin{lstlisting}[language=Verilog]
+// TLBIDX
+always @(posedge clk) begin
+    if (~resetn) begin
+        csr_tlbidx_index <= 4'd0;
+        csr_tlbidx_ps    <= 6'd0;
+        csr_tlbidx_ne    <= 1'b1;
+    end else if (tlbrd_en) begin
+        csr_tlbidx_ps    <= tlbrd_r_e ? tlbrd_r_ps : 6'd0;
+        csr_tlbidx_ne    <= ~tlbrd_r_e;
+    end else if (csr_we && csr_num == `CSR_TLBIDX) begin
+        csr_tlbidx_index <= ( csr_wmask[`CSR_TLBIDX_INDEX] & csr_wvalue[`CSR_TLBIDX_INDEX]) |
+                            (~csr_wmask[`CSR_TLBIDX_INDEX] & csr_tlbidx_index);
+        csr_tlbidx_ps    <= ( csr_wmask[`CSR_TLBIDX_PS]    & csr_wvalue[`CSR_TLBIDX_PS])    |
+                            (~csr_wmask[`CSR_TLBIDX_PS]    & csr_tlbidx_ps);
+        csr_tlbidx_ne    <= ( csr_wmask[`CSR_TLBIDX_NE]    & csr_wvalue[`CSR_TLBIDX_NE])    |
+                            (~csr_wmask[`CSR_TLBIDX_NE]    & csr_tlbidx_ne);
+    end
+end
+\end{lstlisting}
+
+类似地，TLBEHI、TLBELO0、TLBELO1、ASID等寄存器也采用相同的处理方式，在tlbrd\_en有效时根据tlbrd\_r\_e的值决定是写入读取的数据还是清零。
+
+\begin{lstlisting}[language=Verilog]
+// TLBEHI
+always @(posedge clk) begin
+    if (~resetn) begin
+        csr_tlbehi_vppn <= 19'd0;
+    end else if (tlbrd_en) begin
+        csr_tlbehi_vppn <= tlbrd_r_e ? tlbrd_r_vppn : 19'd0;
+    end else if (csr_we && csr_num == `CSR_TLBEHI) begin
+        csr_tlbehi_vppn <= ( csr_wmask[`CSR_TLBEHI_VPPN] & csr_wvalue[`CSR_TLBEHI_VPPN]) |
+                            (~csr_wmask[`CSR_TLBEHI_VPPN] & csr_tlbehi_vppn);
+    end
+end
+\end{lstlisting}
+
+TLBELO0和TLBELO1寄存器在TLBRD时需要根据TLB读口返回的多个字段进行组装，当表项无效时整体清零。
+
+\begin{lstlisting}[language=Verilog]
+// TLBELO0 / TLBELO1
+always @(posedge clk) begin
+    if (~resetn) begin
+        csr_tlbelo0 <= 32'd0;
+        csr_tlbelo1 <= 32'd0;
+    end else if (tlbrd_en) begin
+        csr_tlbelo0 <= tlbrd_r_e ? {4'd0, tlbrd_r_ppn0, 1'b0, tlbrd_r_g, tlbrd_r_mat0, tlbrd_r_plv0, tlbrd_r_d0, tlbrd_r_v0}
+                                  : 32'd0;
+        csr_tlbelo1 <= tlbrd_r_e ? {4'd0, tlbrd_r_ppn1, 1'b0, tlbrd_r_g, tlbrd_r_mat1, tlbrd_r_plv1, tlbrd_r_d1, tlbrd_r_v1}
+                                  : 32'd0;
+    end else if (csr_we && csr_num == `CSR_TLBELO0) begin
+        csr_tlbelo0 <= ( csr_wmask & csr_wvalue) | (~csr_wmask & csr_tlbelo0);
+    end else if (csr_we && csr_num == `CSR_TLBELO1) begin
+        csr_tlbelo1 <= ( csr_wmask & csr_wvalue) | (~csr_wmask & csr_tlbelo1);
+    end
+end
+\end{lstlisting}
+
+ASID寄存器的更新逻辑与TLBEHI类似，在TLBRD时根据tlbrd\_r\_e决定写入或清零。
+
+\begin{lstlisting}[language=Verilog]
+// ASID
+always @(posedge clk) begin
+    if (~resetn) begin
+        csr_asid_asid <= 10'd0;
+    end else if (tlbrd_en) begin
+        csr_asid_asid <= tlbrd_r_e ? tlbrd_r_asid : 10'd0;
+    end else if (csr_we && csr_num == `CSR_ASID) begin
+        csr_asid_asid <= ( csr_wmask[`CSR_ASID_ASID] & csr_wvalue[`CSR_ASID_ASID]) |
+                         (~csr_wmask[`CSR_ASID_ASID] & csr_asid_asid);
+    end
+end
+\end{lstlisting}
+
+\section{实验过程中遇到的问题}
+
+\subsection{TLBSRCH指令的PS域错误更新}
+
+在测试61号测试点时，TLBSRCH指令执行后TLBIDX的PS域被意外修改。根据LoongArch手册，TLBSRCH只应更新NE位（bit 31）和Index域（bit 3:0），不应修改PS域（bit 29:24）。
+
+初始实现中使用了错误的写掩码，允许更新所有字段：
+
+\begin{lstlisting}[language=Verilog]
+// 错误的实现：掩码允许更新所有字段
+wire [31:0] tlbsrch_wvalue = {~tlb_s1_found, 1'b0, tlb_s1_ps, 8'd0, 
+                              12'd0, tlb_s1_index};
+wire [31:0] tlbsrch_wmask  = 32'hffff_ffff;  // 错误：更新了所有字段
+\end{lstlisting}
+
+修复后的实现将写掩码设置为0x8000\_000f，只允许更新bit 31和bit 3:0：
+
+\begin{lstlisting}[language=Verilog]
+// CSR value adjustment for TLB search
+// TLBSRCH only updates NE (bit 31) and Index (bit 3:0), PS field is preserved
+wire [31:0] tlbsrch_wvalue = {~tlb_s1_found, 7'd0, 20'd0, tlb_s1_index};
+wire [31:0] tlbsrch_wmask  = 32'h8000_000f;  // Only update bit 31 (NE) and bit 3:0 (Index)
+wire [13:0] exe_csr_num_final    = (exe_tlb_op == `TLB_OP_SRCH) ? `CSR_TLBIDX : exe_csr_num;
+wire        exe_csr_we_final     = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b1        : exe_csr_we;
+\end{lstlisting}
+
+\subsection{INVTLB指令非法操作码的处理}
+
+在测试69号测试点时，测试代码使用非法的INVTLB操作码（op大于6）。根据LoongArch规范，INVTLB的操作码op只有0到6共7种合法取值，非法操作码应触发指令不存在异常（INE）。
+
+初始实现中未检查操作码合法性，导致非法指令继续执行。修复时在IDU模块的译码阶段增加了合法性检查：
+
+\begin{lstlisting}[language=Verilog]
+wire inst_invtlb  = (inst[31:15] == 17'b00000110010010011);
+wire [4:0] id_invtlb_op = inst[4:0];
+wire       invtlb_illegal = inst_invtlb & (inst[4:0] > 5'd6);
+
+// Exception detection
+wire id_ex_ine = (~inst_known | invtlb_illegal) & id_valid;
+\end{lstlisting}
+
+将invtlb\_illegal信号纳入id\_ex\_ine的生成逻辑后，当检测到非法的INVTLB操作码时，就会触发INE异常，阻止指令继续执行。
+
+\section{实验结果}
+
+
+\section{小组成员分工}
+
+张钧玮：负责exp17的实现。
+
+王荦璠：负责exp18的实现。
+
+陈琛：
+
+\end{document}
