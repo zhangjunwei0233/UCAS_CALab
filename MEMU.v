@@ -43,6 +43,9 @@ module MEMU(
     reg  [13:0] mem_csr_num;
     reg  [31:0] mem_csr_wmask;
     reg  [31:0] mem_csr_wvalue;
+    // TLB pipeline fields
+    reg  [2:0]  mem_tlb_op;
+    reg  [4:0]  mem_invtlb_op;
     // Exception pipeline fields
     reg         mem_ex_valid;
     reg  [5:0]  mem_ecode;
@@ -78,7 +81,8 @@ module MEMU(
             {mem_wait_data_ok_r, mem_res_from_mem, mem_rf_we, mem_rf_waddr, mem_alu_result, mem_mem_op, mem_pc,
              mem_csr_read, mem_csr_we, mem_csr_num, mem_csr_wmask, mem_csr_wvalue,
              mem_vaddr,
-             mem_ex_valid, mem_ecode, mem_esubcode, mem_is_ertn} <= exe_to_mem_zip;
+             mem_ex_valid, mem_ecode, mem_esubcode, mem_is_ertn,
+             mem_tlb_op, mem_invtlb_op} <= exe_to_mem_zip;
         end
     end
 
@@ -162,7 +166,10 @@ module MEMU(
             mem_to_wb_ex_valid,
             mem_to_wb_ecode,
             mem_to_wb_esubcode,
-            mem_to_wb_is_ertn
+            mem_to_wb_is_ertn,
+
+            mem_tlb_op,
+            mem_invtlb_op
     };
 
 endmodule

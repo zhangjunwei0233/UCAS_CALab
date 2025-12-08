@@ -30,7 +30,23 @@ module EXEU(
 
     // Exception signal forwarding from MEM and WB stage
     input wire         mem_ex,
-    input wire         wb_ex
+    input wire         wb_ex,
+
+    // CSR helper signals
+    input  wire [18:0] csr_tlbehi_vppn,
+    input  wire [9:0]  csr_asid_asid,
+
+    // TLB search result from TLB module (port 1)
+    input  wire        tlb_s1_found,
+    input  wire [3:0]  tlb_s1_index,
+    input  wire [5:0]  tlb_s1_ps,
+
+    // TLB search / INVTLB requests to TLB module (port 1)
+    output wire [18:0] tlb_s1_vppn,
+    output wire        tlb_s1_va_bit12,
+    output wire [9:0]  tlb_s1_asid,
+    output wire        tlb_invtlb_valid,
+    output wire [4:0]  tlb_invtlb_op
 );
 
     // Pipeline control
@@ -54,6 +70,9 @@ module EXEU(
     reg  [13:0] exe_csr_num;
     reg  [31:0] exe_csr_wmask;
     reg  [31:0] exe_csr_wvalue;
+    // TLB pipeline fields
+    reg  [2:0]  exe_tlb_op;
+    reg  [4:0]  exe_invtlb_op;
     // Exception pipeline fields
     reg         exe_ex_valid;
     reg  [5:0]  exe_ecode;
@@ -136,7 +155,8 @@ module EXEU(
              exe_rkd_value, exe_pc,
              exe_rdcntvl, exe_rdcntvh,
              exe_csr_read, exe_csr_we, exe_csr_num, exe_csr_wmask, exe_csr_wvalue,
-             exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn} <= id_to_exe_zip;
+             exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn,
+             exe_tlb_op, exe_invtlb_op} <= id_to_exe_zip;
             start_exe <= 1'b1;
         end else
             start_exe <= 1'b0;
@@ -235,6 +255,16 @@ module EXEU(
                           exe_rdcntvh    ? stable_clk_counter[63:32] : // RDCNTVH: stable counter high 32 bits
                           exe_alu_result;                              // Regular ALU result
 
+    // TLB search / INVTLB interface (port 1)
+    assign tlb_s1_vppn    = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
+                            (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] : 19'd0;
+    assign tlb_s1_va_bit12= (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0 :
+                            (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] : 1'b0;
+    assign tlb_s1_asid    = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
+                            (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] : 10'd0;
+    assign tlb_invtlb_op  = exe_invtlb_op;
+    assign tlb_invtlb_valid = exe_to_mem_valid & (exe_tlb_op == `TLB_OP_INV);
+
     // Data SRAM-like interface
     wire addr0 = (exe_alu_result[1:0] == 2'd0);
     wire addr1 = (exe_alu_result[1:0] == 2'd1);
@@ -288,9 +318,20 @@ module EXEU(
                               // default
                               32'd0;
 
+    // CSR value adjustment for TLB search
+    // TLBSRCH only updates NE (bit 31) and Index (bit 3:0), PS field is preserved
+    // Use combinational signals directly from TLB module, not pipeline registers
+    wire [31:0] tlbsrch_wvalue = {~tlb_s1_found, 7'd0, 20'd0, tlb_s1_index};
+    wire [31:0] tlbsrch_wmask  = 32'h8000_000f;  // Only update bit 31 (NE) and bit 3:0 (Index)
+    wire [13:0] exe_csr_num_final    = (exe_tlb_op == `TLB_OP_SRCH) ? `CSR_TLBIDX : exe_csr_num;
+    wire        exe_csr_we_final     = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b1        : exe_csr_we;
+    wire        exe_csr_read_final   = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0        : exe_csr_read;
+    wire [31:0] exe_csr_wmask_final  = (exe_tlb_op == `TLB_OP_SRCH) ? tlbsrch_wmask : exe_csr_wmask;
+    wire [31:0] exe_csr_wvalue_final = (exe_tlb_op == `TLB_OP_SRCH) ? tlbsrch_wvalue : exe_csr_wvalue;
+
     // Forward data to IDU
     assign exe_rf_zip = {
-            exe_valid & exe_csr_read,
+            exe_valid & exe_csr_read_final,
             exe_valid & exe_res_from_mem,
             exe_valid & exe_rf_we,
             exe_rf_waddr,
@@ -307,18 +348,21 @@ module EXEU(
             exe_mem_op,
             exe_pc,
 
-            exe_csr_read,
-            exe_csr_we,
-            exe_csr_num,
-            exe_csr_wmask,
-            exe_csr_wvalue,
+            exe_csr_read_final,
+            exe_csr_we_final,
+            exe_csr_num_final,
+            exe_csr_wmask_final,
+            exe_csr_wvalue_final,
             
             exe_alu_result,  // vaddr for BADV register
 
             exe_to_mem_ex_valid,
             exe_to_mem_ecode,
             exe_to_mem_esubcode,
-            exe_to_mem_is_ertn
+            exe_to_mem_is_ertn,
+
+            exe_tlb_op,
+            exe_invtlb_op
     };
 
 endmodule

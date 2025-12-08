@@ -96,6 +96,18 @@ module mycpu_top
     wire [31:0] csr_wmask;
     wire [31:0] csr_wvalue;
 
+    // TLB related CSR helper wires
+    wire [3:0]  csr_tlbidx_index;
+    wire [5:0]  csr_tlbidx_ps;
+    wire        csr_tlbidx_ne;
+    wire [18:0] csr_tlbehi_vppn;
+    wire [31:0] csr_tlbelo0_value;
+    wire [31:0] csr_tlbelo1_value;
+    wire [31:0] csr_asid_value;
+    wire [31:0] csr_tlbidx_value;
+    wire [31:0] csr_tlbehi_value;
+    wire [31:0] csr_tlbren_value;
+
     // WBU exception/ertn info
     wire        wb_ex_valid;
     wire [31:0] wb_ex_pc;
@@ -103,6 +115,49 @@ module mycpu_top
     wire [5:0]  wb_ecode;
     wire [8:0]  wb_esubcode;
     wire        wb_is_ertn;
+
+    // TLB interface wires
+    wire [18:0] tlb_s1_vppn;
+    wire        tlb_s1_va_bit12;
+    wire [9:0]  tlb_s1_asid;
+    wire        tlb_invtlb_valid;
+    wire [4:0]  tlb_invtlb_op;
+    wire        tlb_s1_found;
+    wire [3:0]  tlb_s1_index;
+    wire [5:0]  tlb_s1_ps;
+    wire        tlb_r_e;
+    wire [18:0] tlb_r_vppn;
+    wire [5:0]  tlb_r_ps;
+    wire [9:0]  tlb_r_asid;
+    wire        tlb_r_g;
+    wire [19:0] tlb_r_ppn0;
+    wire [1:0]  tlb_r_plv0;
+    wire [1:0]  tlb_r_mat0;
+    wire        tlb_r_d0;
+    wire        tlb_r_v0;
+    wire [19:0] tlb_r_ppn1;
+    wire [1:0]  tlb_r_plv1;
+    wire [1:0]  tlb_r_mat1;
+    wire        tlb_r_d1;
+    wire        tlb_r_v1;
+    wire        tlb_we;
+    wire [3:0]  tlb_w_index;
+    wire        tlb_w_e;
+    wire [18:0] tlb_w_vppn;
+    wire [5:0]  tlb_w_ps;
+    wire [9:0]  tlb_w_asid;
+    wire        tlb_w_g;
+    wire [19:0] tlb_w_ppn0;
+    wire [1:0]  tlb_w_plv0;
+    wire [1:0]  tlb_w_mat0;
+    wire        tlb_w_d0;
+    wire        tlb_w_v0;
+    wire [19:0] tlb_w_ppn1;
+    wire [1:0]  tlb_w_plv1;
+    wire [1:0]  tlb_w_mat1;
+    wire        tlb_w_d1;
+    wire        tlb_w_v1;
+    wire        csr_tlbrd_en;
 
     wire                clk;                    // From my_bridge of bridge.v
     wire [31:0]         data_sram_addr;         // From my_exeu of EXEU.v
@@ -251,7 +306,17 @@ module mycpu_top
         .mem_allowin           (mem_allowin),
         .data_sram_addr_ok     (data_sram_addr_ok),
         .mem_ex                (mem_ex),
-        .wb_ex                 (wb_ex));
+        .wb_ex                 (wb_ex),
+        .csr_tlbehi_vppn       (csr_tlbehi_vppn),
+        .csr_asid_asid         (csr_asid_value[9:0]),
+        .tlb_s1_found          (tlb_s1_found),
+        .tlb_s1_index          (tlb_s1_index),
+        .tlb_s1_ps             (tlb_s1_ps),
+        .tlb_s1_vppn           (tlb_s1_vppn),
+        .tlb_s1_va_bit12       (tlb_s1_va_bit12),
+        .tlb_s1_asid           (tlb_s1_asid),
+        .tlb_invtlb_valid      (tlb_invtlb_valid),
+        .tlb_invtlb_op         (tlb_invtlb_op));
 
     MEMU my_memu(
         // Outputs
@@ -296,7 +361,47 @@ module mycpu_top
         .resetn                  (resetn),
         .mem_to_wb_valid         (mem_to_wb_valid),
         .mem_to_wb_zip           (mem_to_wb_zip[`MEM2WB_LEN-1:0]),
-        .csr_rvalue              (csr_rvalue[31:0]));
+        .csr_rvalue              (csr_rvalue[31:0]),
+        .csr_tlbidx_index        (csr_tlbidx_index),
+        .csr_tlbidx_ps           (csr_tlbidx_ps),
+        .csr_tlbidx_ne           (csr_tlbidx_ne),
+        .csr_tlbehi_vppn         (csr_tlbehi_vppn),
+        .csr_tlbelo0_value       (csr_tlbelo0_value),
+        .csr_tlbelo1_value       (csr_tlbelo1_value),
+        .csr_asid_value          (csr_asid_value),
+        .tlb_r_e                 (tlb_r_e),
+        .tlb_r_vppn              (tlb_r_vppn),
+        .tlb_r_ps                (tlb_r_ps),
+        .tlb_r_asid              (tlb_r_asid),
+        .tlb_r_g                 (tlb_r_g),
+        .tlb_r_ppn0              (tlb_r_ppn0),
+        .tlb_r_plv0              (tlb_r_plv0),
+        .tlb_r_mat0              (tlb_r_mat0),
+        .tlb_r_d0                (tlb_r_d0),
+        .tlb_r_v0                (tlb_r_v0),
+        .tlb_r_ppn1              (tlb_r_ppn1),
+        .tlb_r_plv1              (tlb_r_plv1),
+        .tlb_r_mat1              (tlb_r_mat1),
+        .tlb_r_d1                (tlb_r_d1),
+        .tlb_r_v1                (tlb_r_v1),
+        .tlb_we                  (tlb_we),
+        .tlb_w_index             (tlb_w_index),
+        .tlb_w_e                 (tlb_w_e),
+        .tlb_w_vppn              (tlb_w_vppn),
+        .tlb_w_ps                (tlb_w_ps),
+        .tlb_w_asid              (tlb_w_asid),
+        .tlb_w_g                 (tlb_w_g),
+        .tlb_w_ppn0              (tlb_w_ppn0),
+        .tlb_w_plv0              (tlb_w_plv0),
+        .tlb_w_mat0              (tlb_w_mat0),
+        .tlb_w_d0                (tlb_w_d0),
+        .tlb_w_v0                (tlb_w_v0),
+        .tlb_w_ppn1              (tlb_w_ppn1),
+        .tlb_w_plv1              (tlb_w_plv1),
+        .tlb_w_mat1              (tlb_w_mat1),
+        .tlb_w_d1                (tlb_w_d1),
+        .tlb_w_v1                (tlb_w_v1),
+        .csr_tlbrd_en            (csr_tlbrd_en));
 
     // CSR instance (updated for exp13)
     CSR u_csr(
@@ -321,7 +426,100 @@ module mycpu_top
         .csr_wvalue               (csr_wvalue[31:0]),
         .wb_vaddr                 (wb_vaddr[31:0]),
         .wb_ecode                 (wb_ecode[5:0]),
-        .wb_esubcode              (wb_esubcode[8:0]));
+        .wb_esubcode              (wb_esubcode[8:0]),
+        .tlbrd_en                 (csr_tlbrd_en),
+        .tlbrd_r_e                (tlb_r_e),
+        .tlbrd_r_vppn             (tlb_r_vppn),
+        .tlbrd_r_ps               (tlb_r_ps),
+        .tlbrd_r_asid             (tlb_r_asid),
+        .tlbrd_r_g                (tlb_r_g),
+        .tlbrd_r_ppn0             (tlb_r_ppn0),
+        .tlbrd_r_plv0             (tlb_r_plv0),
+        .tlbrd_r_mat0             (tlb_r_mat0),
+        .tlbrd_r_d0               (tlb_r_d0),
+        .tlbrd_r_v0               (tlb_r_v0),
+        .tlbrd_r_ppn1             (tlb_r_ppn1),
+        .tlbrd_r_plv1             (tlb_r_plv1),
+        .tlbrd_r_mat1             (tlb_r_mat1),
+        .tlbrd_r_d1               (tlb_r_d1),
+        .tlbrd_r_v1               (tlb_r_v1),
+        .tlbidx_index             (csr_tlbidx_index),
+        .tlbidx_ps                (csr_tlbidx_ps),
+        .tlbidx_ne                (csr_tlbidx_ne),
+        .tlbehi_vppn              (csr_tlbehi_vppn),
+        .csr_tlbidx_value         (csr_tlbidx_value),
+        .csr_tlbehi_value         (csr_tlbehi_value),
+        .csr_tlbelo0_value        (csr_tlbelo0_value),
+        .csr_tlbelo1_value        (csr_tlbelo1_value),
+        .csr_asid_value           (csr_asid_value),
+        .csr_tlbren_value         (csr_tlbren_value));
+
+    // TLB instance (TLBNUM = 16)
+    tlb u_tlb(
+        .clk(clk),
+        // search port 0 unused for now
+        .s0_vppn      (19'd0),
+        .s0_va_bit12  (1'b0),
+        .s0_asid      (10'd0),
+        .s0_found     (),
+        .s0_index     (),
+        .s0_ppn       (),
+        .s0_ps        (),
+        .s0_plv       (),
+        .s0_mat       (),
+        .s0_d         (),
+        .s0_v         (),
+        // search port 1 (for TLB ops)
+        .s1_vppn      (tlb_s1_vppn),
+        .s1_va_bit12  (tlb_s1_va_bit12),
+        .s1_asid      (tlb_s1_asid),
+        .s1_found     (tlb_s1_found),
+        .s1_index     (tlb_s1_index),
+        .s1_ppn       (),
+        .s1_ps        (tlb_s1_ps),
+        .s1_plv       (),
+        .s1_mat       (),
+        .s1_d         (),
+        .s1_v         (),
+        // invtlb opcode
+        .invtlb_valid (tlb_invtlb_valid),
+        .invtlb_op    (tlb_invtlb_op),
+        // write port
+        .we           (tlb_we),
+        .w_index      (tlb_w_index),
+        .w_e          (tlb_w_e),
+        .w_vppn       (tlb_w_vppn),
+        .w_ps         (tlb_w_ps),
+        .w_asid       (tlb_w_asid),
+        .w_g          (tlb_w_g),
+        .w_ppn0       (tlb_w_ppn0),
+        .w_plv0       (tlb_w_plv0),
+        .w_mat0       (tlb_w_mat0),
+        .w_d0         (tlb_w_d0),
+        .w_v0         (tlb_w_v0),
+        .w_ppn1       (tlb_w_ppn1),
+        .w_plv1       (tlb_w_plv1),
+        .w_mat1       (tlb_w_mat1),
+        .w_d1         (tlb_w_d1),
+        .w_v1         (tlb_w_v1),
+        // read port
+        .r_index      (csr_tlbidx_index),
+        .r_e          (tlb_r_e),
+        .r_vppn       (tlb_r_vppn),
+        .r_ps         (tlb_r_ps),
+        .r_asid       (tlb_r_asid),
+        .r_g          (tlb_r_g),
+        .r_ppn0       (tlb_r_ppn0),
+        .r_plv0       (tlb_r_plv0),
+        .r_mat0       (tlb_r_mat0),
+        .r_d0         (tlb_r_d0),
+        .r_v0         (tlb_r_v0),
+        .r_ppn1       (tlb_r_ppn1),
+        .r_plv1       (tlb_r_plv1),
+        .r_mat1       (tlb_r_mat1),
+        .r_d1         (tlb_r_d1),
+        .r_v1         (tlb_r_v1)
+    );
 
     assign flush = wb_is_ertn | wb_ex_valid;
     assign flush_target = wb_is_ertn ? csr_era : csr_ex_entry;
