@@ -115,6 +115,15 @@
 
 \section{设计详细分析}
 
+\subsection{处理器结构设计框图}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{fig/CPU_arch_prj6.png}
+    \caption{处理器结构设计框图}
+    \label{fig:CPU_arch_prj6}
+\end{figure}
+
 \subsection{TLB模块设计（exp17）}
 
 exp17的目标是独立完成一个可复用的TLB（Translation Lookaside Buffer）模块，为后续在CPU中集成MMU与TLB指令/CSR打基础。根据讲义的设计分析，TLB模块需要同时服务取指与访存两处的地址转换，提供两套独立查找端口，并额外支持TLBSRCH的索引输出、TLBWR/TLBFILL写端口、TLBRD读端口，以及INVTLB的按条件无效化能力。
@@ -436,6 +445,88 @@ always @(posedge clk) begin
 end
 \end{lstlisting}
 
+\subsection{TLB相关异常及虚实地址映射功能（exp19）}
+
+\subsubsection{TLB相关异常的实现}
+
+需要实现以下与TLB相关的异常：TLB重填异常、Load/Store/Fetch操作页无效异常、页特权级不合规异常、页修改异常。由于在取指级和执行级都需要进行虚实地址转换，上述大部分异常在两个阶段都可能发生。接下来以执行级为例，说明上述异常的产生方式：
+
+\begin{lstlisting}[language=Verilog]
+wire tlb_gen_error       = is_mem_op & csr_crmd_pg_value & !is_dmw0 & !is_dmw1;
+wire tlb_refill_error    = tlb_gen_error & !s1_found;
+wire load_invalid_error  = tlb_gen_error & !is_store & s1_found & !s1_v;
+wire store_invalid_error = tlb_gen_error &  is_store & s1_found & !s1_v;
+wire tlb_plv_error       = tlb_gen_error & s1_found & s1_v & (csr_crmd_plv_value > s1_plv);
+wire tlb_modify_error    = tlb_gen_error & s1_found & s1_v & is_store & !s1_d;
+\end{lstlisting}
+
+上述代码中，\texttt{tlb_gen_error}用于判断当前指令是否可能产生TLB相关异常。只有访存指令在启用了地址翻译、且目标地址没有落在直接地址翻译的区域时，才进行TLB相关异常的判断。针对每个具体异常的判断，流程图如下：
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1.0\textwidth]{fig/TLB_Exception.png}
+    \caption{TLB相关例外判断流程}
+    \label{fig:TLB_Exception}
+\end{figure}
+
+其中需要注意的一点是，\texttt{tlb_plv_error}和\texttt{tlb_modify_error}并不是互斥的关系，但Loongarch手册中规定\texttt{tlb_plv_error}的优先级更高，因此在生成\texttt{ecode}时需遵守这个优先级规定。
+
+除了生成异常原因，在TLB相关异常产生时还需记录对应的访存请求的虚拟地址。对于取指级产生的TLB相关异常而言，这个异常地址即为PC值；对于执行级产生的TLB相关异常而言，这个异常地址为访存指令访问的地址，也即ALU计算偏移量得出的结果。该地址需要被记录到BADV CSR中，供异常处理程序使用。
+
+在异常生成后，处理器需跳转到异常处理程序入口处。对于TLB重填异常，有独立的异常处理程序入口，记录在TLBRENTRY CSR中。其他TLB相关异常共用全局异常入口。具体如下：
+
+\begin{lstlisting}[language=Verilog]
+assign flush_target = wb_is_ertn ? csr_era :
+                      (wb_ecode == `ECODE_TLBR) ? csr_tlbren_value :
+                      csr_ex_entry;
+\end{lstlisting}
+
+\subsubsection{直接映射地址翻译模式的实现}
+
+直接映射地址翻译模式需实现DMW0和DMW1两个CSR，记录虚拟地址最高3位与物理地址最高3位的映射关系。
+
+在实际内存访问过程中，需要首先判断一个虚拟地址是否落在直接映射地址翻译的区域。若是，则将对应的物理地址高3位直接拼接上虚拟地址低29位，代码如下：
+
+\begin{lstlisting}[language=Verilog]
+assign paddr = is_dmw0 ? {csr_dmw0_value[27:25], vaddr[28:0]} :
+               is_dmw1 ? {csr_dmw1_value[27:25], vaddr[28:0]} :
+               tlb_paddr;
+\end{lstlisting}
+
+\subsubsection{页表映射地址翻译模式的实现}
+
+若一个虚拟地址不在直接映射地址翻译区域内，则需要进行页表映射地址翻译，其具体操作为将虚拟地址送入TLB进行查询，并根据返回的TLB表项生成物理地址（或产生异常）。由于目前只支持4KB和4MB的页面大小，只需要根据返回的\texttt{ps}值，将物理页号和虚拟地址的低位进行拼接，即可得到物理地址。
+
+值得注意的是，在执行级，访存操作的和TLB指令的查询复用了同一套TLB查询端口，因此需要进行多路复选：
+
+\begin{lstlisting}[language=Verilog]
+assign s1_vppn     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
+                     (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] :
+                     is_mem_op                    ? exe_alu_result[31:13] :
+                     19'd0;
+assign s1_va_bit12 = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0 :
+                     (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] :
+                     is_mem_op                    ? exe_alu_result[12] :
+                     1'b0;
+assign s1_asid     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
+                     (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] :
+                     is_mem_op                    ? csr_asid_asid :
+                     10'd0;
+\end{lstlisting}
+
+综合直接映射和页表映射的地址翻译过程，即可写出完整的虚实地址转换过程（仍以执行级为例）：
+
+\begin{lstlisting}[language=Verilog]
+wire [31:0] paddr =
+            csr_crmd_pg_value ?
+            ( is_dmw0 ? {csr_dmw0_value[27:25], exe_alu_result[28:0]} :
+              is_dmw1 ? {csr_dmw1_value[27:25], exe_alu_result[28:0]} :
+              ( (s1_ps == 12) ?
+                {s1_ppn[19:0], exe_alu_result[11:0]} :
+                {s1_ppn[19:9], exe_alu_result[20:0]} )
+             ) : exe_alu_result;
+\end{lstlisting}
+
 \section{实验过程中遇到的问题}
 
 \subsection{TLBSRCH指令的PS域错误更新}
@@ -479,8 +570,20 @@ wire id_ex_ine = (~inst_known | invtlb_illegal) & id_valid;
 
 将invtlb\_illegal信号纳入id\_ex\_ine的生成逻辑后，当检测到非法的INVTLB操作码时，就会触发INE异常，阻止指令继续执行。
 
+\subsection{出现TLB异常时的取指处理}
+
+在TLB出现异常（如重填、页无效）时，取指时无法获取到有效的物理地址值。如果直接将无效的物理地址值送入总线，则可能导致出现难以预期的访存情况。然而，由于所有异常都需要被传递至写回级处理，此时必须获得一条用于携带异常信息的指令。因此，本次实验中在出现取指异常时，产生一条虚假的NOP指令送入后续流水级，用于携带相关的异常信息。
+
+\begin{lstlisting}[language=Verilog]
+if (if_ex_valid) begin
+    inst_buf_valid <= 1;
+    inst_buf       <= 32'h02800000;
+end
+\end{lstlisting}
+
 \section{实验结果}
 
+为处理器添加了TLB模块，实现了虚拟内存的映射和管理机制，并在FPGA实验平台上通过了所有测试用例。
 
 \section{小组成员分工}
 
@@ -488,6 +591,6 @@ wire id_ex_ine = (~inst_known | invtlb_illegal) & id_valid;
 
 王荦璠：负责exp18的实现。
 
-陈琛：
+陈琛：负责exp19的实现。
 
 \end{document}
