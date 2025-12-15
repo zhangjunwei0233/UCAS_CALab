@@ -198,15 +198,11 @@ module mycpu_top
     wire                s1_v;                   // From u_tlb of tlb.v
     wire                s1_va_bit12;            // From my_exeu of EXEU.v
     wire [18:0]         s1_vppn;                // From my_exeu of EXEU.v
-
-    /*AUTOWIRE*/
-    // Beginning of automatic wires (for undeclared instantiated-module outputs)
     wire                csr_crmd_da_value;      // From u_csr of CSR.v
     wire                csr_crmd_pg_value;      // From u_csr of CSR.v
     wire [1:0]          csr_crmd_plv_value;     // From u_csr of CSR.v
     wire [31:0]         csr_dmw0_value;         // From u_csr of CSR.v
     wire [31:0]         csr_dmw1_value;         // From u_csr of CSR.v
-    // End of automatics
     
     bridge my_bridge(
         // Outputs

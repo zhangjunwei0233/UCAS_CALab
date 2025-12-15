@@ -35,7 +35,7 @@ module IFU(
     input wire [9:0]               csr_asid_asid,
     input wire                     csr_crmd_da_value,
     input wire                     csr_crmd_pg_value,
-    input wire                     csr_crmd_plv_value,
+    input wire [1:0]               csr_crmd_plv_value,
     input wire [31:0]              csr_dmw0_value,
     input wire [31:0]              csr_dmw1_value,
 

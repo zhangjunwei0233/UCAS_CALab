@@ -141,7 +141,6 @@ module WBU(
             wb_esubcode_r <= 9'd0;
             wb_is_ertn_r  <= 1'b0;
             wb_vaddr_r    <= 32'd0;
-            tlb_fill_ptr  <= 4'd0;
         end else if (wb_ex_raw) begin
             wb_ex_valid_r <= 1'b0;
             wb_ecode_r    <= 6'd0;
