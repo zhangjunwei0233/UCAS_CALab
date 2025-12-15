@@ -114,6 +114,14 @@
     `define CSR_TVAL        66
     `define CSR_TVAL_VAL    31:0
 
+    `define CSR_DMW0        384
+    `define CSR_DMW1        385
+    `define CSR_DMW_PLV0    0
+    `define CSR_DMW_PLV3    3
+    `define CSR_DMW_MAT     5:4
+    `define CSR_DMW_PSEG    27:25
+    `define CSR_DMW_VSEG    31:29
+
     // TLB op encoding
     `define TLB_OP_NONE  3'd0
     `define TLB_OP_SRCH  3'd1

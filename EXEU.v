@@ -38,6 +38,8 @@ module EXEU(
     input wire                       csr_crmd_da_value,
     input wire                       csr_crmd_pg_value,
     input wire [1:0]                 csr_crmd_plv_value,
+    input wire [31:0]                csr_dmw0_value,
+    input wire [31:0]                csr_dmw1_value,
 
     // TLB related (Port 1)
     output wire [18:0]               s1_vppn,
@@ -170,7 +172,16 @@ module EXEU(
     end
 
     // Address Translation
-    wire [31:0] paddr = csr_crmd_pg_value ? {s1_ppn, exe_alu_result[11:0]} : exe_alu_result;
+    wire is_dmw0 = exe_alu_result[31:29] == csr_dmw0_value[31:29];
+    wire is_dmw1 = exe_alu_result[31:29] == csr_dmw1_value[31:29];
+    wire [31:0] paddr =
+                csr_crmd_pg_value ?
+                ( is_dmw0 ? {csr_dmw0_value[27:25], exe_alu_result[28:0]} :
+                  is_dmw1 ? {csr_dmw1_value[27:25], exe_alu_result[28:0]} :
+                  ( (s1_ps == 12) ?
+                    {s1_ppn[19:0], exe_alu_result[11:0]} :
+                    {s1_ppn[19:9], exe_alu_result[20:0]} )
+                 ) : exe_alu_result;
 
     // Exception generation
     // Address alignment check for memory operations
@@ -181,7 +192,7 @@ module EXEU(
     wire addr_align_error    = is_mem_op & ((is_half_op & paddr[0]) |        // Half-word must be 2-byte aligned
                                             (is_word_op & (|paddr[1:0]))     // Word must be 4-byte aligned
                                             );
-    wire tlb_gen_error       = is_mem_op & csr_crmd_pg_value;
+    wire tlb_gen_error       = is_mem_op & csr_crmd_pg_value & !is_dmw0 & !is_dmw1;
     wire tlb_refill_error    = tlb_gen_error & !s1_found;
     wire load_invalid_error  = tlb_gen_error & !is_store & s1_found & !s1_v;
     wire store_invalid_error = tlb_gen_error &  is_store & s1_found & !s1_v;
@@ -384,7 +395,7 @@ module EXEU(
             exe_csr_wmask_final,
             exe_csr_wvalue_final,
             
-            exe_alu_result,  // vaddr for BADV register
+            exe_ex_valid ? exe_pc : exe_alu_result,  // vaddr for BADV register
 
             exe_to_mem_ex_valid,
             exe_to_mem_ecode,

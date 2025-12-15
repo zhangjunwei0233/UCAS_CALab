@@ -204,6 +204,8 @@ module mycpu_top
     wire                csr_crmd_da_value;      // From u_csr of CSR.v
     wire                csr_crmd_pg_value;      // From u_csr of CSR.v
     wire [1:0]          csr_crmd_plv_value;     // From u_csr of CSR.v
+    wire [31:0]         csr_dmw0_value;         // From u_csr of CSR.v
+    wire [31:0]         csr_dmw1_value;         // From u_csr of CSR.v
     // End of automatics
     
     bridge my_bridge(
@@ -293,12 +295,16 @@ module mycpu_top
                .s0_index                (s0_index[3:0]),
                .s0_ppn                  (s0_ppn[19:0]),
                .s0_ps                   (s0_ps[5:0]),
+               .s0_plv                  (s0_plv[1:0]),
                .s0_mat                  (s0_mat[1:0]),
                .s0_d                    (s0_d),
                .s0_v                    (s0_v),
                .csr_asid_asid           (csr_asid_asid[9:0]),
                .csr_crmd_da_value       (csr_crmd_da_value),
                .csr_crmd_pg_value       (csr_crmd_pg_value),
+               .csr_crmd_plv_value      (csr_crmd_plv_value),
+               .csr_dmw0_value          (csr_dmw0_value[31:0]),
+               .csr_dmw1_value          (csr_dmw1_value[31:0]),
                .id_allowin              (id_allowin),
                .br_stall                (br_stall),
                .br_taken                (br_taken),
@@ -356,6 +362,8 @@ module mycpu_top
                  .csr_crmd_da_value     (csr_crmd_da_value),
                  .csr_crmd_pg_value     (csr_crmd_pg_value),
                  .csr_crmd_plv_value    (csr_crmd_plv_value[1:0]),
+                 .csr_dmw0_value        (csr_dmw0_value[31:0]),
+                 .csr_dmw1_value        (csr_dmw1_value[31:0]),
                  .s1_found              (s1_found),
                  .s1_index              (s1_index[3:0]),
                  .s1_ppn                (s1_ppn[19:0]),
@@ -478,6 +486,8 @@ module mycpu_top
               .csr_crmd_da_value        (csr_crmd_da_value),
               .csr_crmd_pg_value        (csr_crmd_pg_value),
               .csr_crmd_plv_value       (csr_crmd_plv_value[1:0]),
+              .csr_dmw0_value           (csr_dmw0_value[31:0]),
+              .csr_dmw1_value           (csr_dmw1_value[31:0]),
               // Inputs
               .clk                      (clk),
               .resetn                   (resetn),
