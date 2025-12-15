@@ -117,6 +117,112 @@
 
 \subsection{TLB模块设计（exp17）}
 
+exp17的目标是独立完成一个可复用的TLB（Translation Lookaside Buffer）模块，为后续在CPU中集成MMU与TLB指令/CSR打基础。根据讲义的设计分析，TLB模块需要同时服务取指与访存两处的地址转换，提供两套独立查找端口，并额外支持TLBSRCH的索引输出、TLBWR/TLBFILL写端口、TLBRD读端口，以及INVTLB的按条件无效化能力。
+
+\subsubsection{模块接口与表项组织}
+
+我们采用全相联（fully-associative）结构，TLB项数参数化为\texttt{TLBNUM=16}。每个TLB表项在逻辑上可分为两类信息：第一类字段既参与读写也参与查找比较（包括\texttt{E, VPPN, PS, ASID, G}），第二类字段仅参与读写（包括奇偶页两套\texttt{PPN/PLV/MAT/D/V}）。
+
+模块接口完全对齐讲义给出的端口定义：两套查找端口\texttt{s0/s1}分别对应取指与访存；写端口由\texttt{we + w\_index}寻址并写入整条表项；读端口由\texttt{r\_index}读出整条表项；INVTLB通过\texttt{invtlb\_valid + invtlb\_op}在模块内部对匹配项执行\texttt{E<=0}无效化。
+
+\begin{lstlisting}[language=Verilog]
+    reg [TLBNUM - 1:0] tlb_e;
+    reg [TLBNUM - 1:0] tlb_ps4MB; //pagesize 1:4MB, 0:4KB
+    reg [        18:0] tlb_vppn [TLBNUM - 1:0];
+    reg [         9:0] tlb_asid [TLBNUM - 1:0];
+    reg                tlb_g    [TLBNUM - 1:0];
+
+    reg [        19:0] tlb_ppn0 [TLBNUM - 1:0];
+    reg [         1:0] tlb_plv0 [TLBNUM - 1:0];
+    reg [         1:0] tlb_mat0 [TLBNUM - 1:0];
+    reg                tlb_d0   [TLBNUM - 1:0];
+    reg                tlb_v0   [TLBNUM - 1:0];
+
+    reg [        19:0] tlb_ppn1 [TLBNUM - 1:0];
+    reg [         1:0] tlb_plv1 [TLBNUM - 1:0];
+    reg [         1:0] tlb_mat1 [TLBNUM - 1:0];
+    reg                tlb_d1   [TLBNUM - 1:0];
+    reg                tlb_v1   [TLBNUM - 1:0];
+\end{lstlisting}
+
+\subsubsection{页大小（PS）域的表示与转换}
+
+LoongArch32精简版仅需支持4KB与4MB两种页大小，因此虽然接口上的\texttt{PS}是6位编码，但TLB内部用1位\texttt{tlb\_ps4MB}存放页大小：\texttt{1}表示4MB页，\texttt{0}表示4KB页；写入时将\texttt{w\_ps==6'd21}映射为4MB页，否则为4KB页；查找命中后输出\texttt{s\_ps}时反向映射为\texttt{6'd21/6'd12}。
+
+\subsubsection{并行全相联查找逻辑（双端口）}
+
+查找操作采用并行比较：对每个端口分别生成\texttt{match}位向量（宽度为\texttt{TLBNUM}），\texttt{match[i]=1}表示第\texttt{i}项命中。
+
+对于每一项，命中条件包含四部分：
+\begin{enumerate}
+  \item 表项有效：\texttt{tlb\_e[i]==1}；
+  \item \texttt{VPPN}匹配：\texttt{s\_vppn[18:9]==tlb\_vppn[i][18:9]}；
+  \item 若为4KB页则低位继续匹配：\texttt{(tlb\_ps4MB[i] || s\_vppn[8:0]==tlb\_vppn[i][8:0])}；
+  \item ASID/全局匹配：\texttt{(s\_asid==tlb\_asid[i]) || tlb\_g[i]}。
+\end{enumerate}
+
+命中判定\texttt{s\_found}由\texttt{|match}得到；命中索引\texttt{s\_index}通过“onehot多路选择器”从\texttt{match}中编码得到（实现上等价于对每个\texttt{i}做\texttt{\{width\{match[i]\}\}\&i}再或起来）。
+
+\begin{lstlisting}[language=Verilog]
+wire [TLBNUM - 1:0] s0_match;
+    wire [TLBNUM - 1:0] s1_match;
+    wire                s0_select_second_page;
+    wire                s1_select_second_page;
+
+    wire [TLBNUM - 1:0] inv_match;
+
+    wire [TLBNUM - 1:0] cond1;      // G == 0
+    wire [TLBNUM - 1:0] cond2;      // G == 1
+    wire [TLBNUM - 1:0] s0_cond3;   // s0_asid == ASID
+    wire [TLBNUM - 1:0] s1_cond3;   // s1_asid == ASID
+    wire [TLBNUM - 1:0] s0_cond4;   // s0_vppn match
+    wire [TLBNUM - 1:0] s1_cond4;   // s1_vppn match
+
+
+    genvar i;
+    generate
+        for (i = 0; i < TLBNUM; i = i + 1) begin
+            assign    cond1[i] =  (tlb_g[i] == 1'b0);
+            assign    cond2[i] =  (tlb_g[i] == 1'b1);
+            assign s0_cond3[i] =  (s0_asid == tlb_asid[i]);
+            assign s1_cond3[i] =  (s1_asid == tlb_asid[i]);
+            assign s0_cond4[i] =  (s0_vppn[18:9] == tlb_vppn[i][18:9])
+                               && (tlb_ps4MB[i] || (s0_vppn[8:0] == tlb_vppn[i][8:0]));
+            assign s1_cond4[i] =  (s1_vppn[18:9] == tlb_vppn[i][18:9])
+                               && (tlb_ps4MB[i] || (s1_vppn[8:0] == tlb_vppn[i][8:0]));
+
+            assign s0_match[i]  =  tlb_e[i] && s0_cond4[i] && (s0_cond3[i] || cond2[i]);
+            assign s1_match[i]  =  tlb_e[i] && s1_cond4[i] && (s1_cond3[i] || cond2[i]);
+            assign inv_match[i] =  (invtlb_op == 5'h0 || invtlb_op == 5'h1) && (cond1[i] || cond2[i])
+                                || (invtlb_op == 5'h2)                      && (cond2[i])
+                                || (invtlb_op == 5'h3)                      && (cond1[i])
+                                || (invtlb_op == 5'h4)                      && (cond1[i] && s1_cond3[i])
+                                || (invtlb_op == 5'h5)                      && (cond1[i] && s1_cond3[i] && s1_cond4[i])
+                                || (invtlb_op == 5'h6)                      && s1_match[i];
+        end
+    endgenerate
+\end{lstlisting}
+
+\paragraph{奇偶页选择与输出字段组装}
+TLB每个表项同时描述偶页与奇页两套属性。命中某项后，需要根据访问地址选择输出\texttt{PPN/PLV/MAT/D/V}来自偶页还是奇页：
+\begin{itemize}
+  \item 若为4KB页，则用虚地址\texttt{va[12]}（对应端口输入\texttt{s\_va\_bit12}）选择奇偶页；
+  \item 若为4MB页，则用\texttt{VPPN[8]}选择奇偶页（因为4MB页内偏移更大，奇偶页划分位随之上移）。
+\end{itemize}
+最终，\texttt{s\_ppn/s\_ps/s\_plv/s\_mat/s\_d/s\_v}等输出都根据该选择信号从\texttt{ppn0/ppn1}等字段中二选一得到。
+
+\subsubsection{INVTLB无效化逻辑}
+
+INVTLB需要在TLB内部完成“按条件匹配+清E位”的无效化操作。讲义给出了将各操作类型分解为4个“子匹配”的方法：\texttt{cond1(G=0)}, \texttt{cond2(G=1)}, \texttt{cond3(ASID相等)}, \texttt{cond4(VPPN/PS匹配)}，并列出了不同\texttt{op}的组合形式。
+
+我们据此实现\texttt{inv\_match[i]}，并在时序逻辑中，当\texttt{invtlb\_valid}有效时对所有\texttt{inv\_match[i]=1}的表项执行\texttt{tlb\_e[i] <= 1'b0}。其中，\texttt{op=0/1}对应\texttt{cond1||cond2}（清空所有项），\texttt{op=4/5}对应\texttt{cond1\&\&cond3}及进一步与\texttt{cond4}组合，\texttt{op=6}直接复用普通查找命中条件。
+
+\subsubsection{读写端口实现}
+
+写端口为同步写：当\texttt{we}有效时，使用\texttt{w\_index}对所有字段寄存器数组写入，包含\texttt{E/VPPN/ASID/G/PS}以及两页的\texttt{PPN/PLV/MAT/D/V}。其中\texttt{PS}在写入时转换为内部1位\texttt{tlb\_ps4MB}。
+
+读端口为组合读：\texttt{r\_index}直接索引各字段数组，并输出\texttt{r\_e/r\_vppn/r\_ps/r\_asid/r\_g/...}。需要注意的是，虽然内部页大小用1位保存，但读口输出仍需恢复为6位\texttt{PS}编码，以满足TLBRD在CSR侧的软件可见格式。
+
 \subsection{TLB相关指令和CSR寄存器（exp18）}
 
 exp18的关键在于正确处理TLB指令在流水线中的执行时机、CSR寄存器与TLB模块之间的数据交互，以及维护流水线各级间打包传递的信号完整性。
