@@ -1,30 +1,47 @@
 `include "macros.h"
 module IFU(
-    input   wire        clk,
-    input   wire        resetn,
+    input wire                     clk,
+    input wire                     resetn,
 
     // Global flush from WB (exception/ertn)
-    input   wire        flush,
-    input   wire [31:0] flush_target,
+    input wire                     flush,
+    input wire [31:0]              flush_target,
 
     // Instruction SRAM-like interface
-    output  wire        inst_sram_req,
-    output  wire        inst_sram_wr,
-    output  wire [ 1:0] inst_sram_size,
-    output  wire [31:0] inst_sram_addr,
-    output  wire [ 3:0] inst_sram_wstrb,
-    output  wire [31:0] inst_sram_wdata,
-    input   wire        inst_sram_addr_ok,
-    input   wire        inst_sram_data_ok,
-    input   wire [31:0] inst_sram_rdata,
+    output wire                    inst_sram_req,
+    output wire                    inst_sram_wr,
+    output wire [ 1:0]             inst_sram_size,
+    output wire [31:0]             inst_sram_addr,
+    output wire [ 3:0]             inst_sram_wstrb,
+    output wire [31:0]             inst_sram_wdata,
+    input wire                     inst_sram_addr_ok,
+    input wire                     inst_sram_data_ok,
+    input wire [31:0]              inst_sram_rdata,
+
+    // TLB related (Port 0)
+    output wire [18:0]             s0_vppn,
+    output wire                    s0_va_bit12,
+    output wire [9:0]              s0_asid,
+    input wire                     s0_found,
+    input wire [3:0]               s0_index,
+    input wire [19:0]              s0_ppn,
+    input wire [5:0]               s0_ps,
+    input wire [1:0]               s0_mat,
+    input wire                     s0_d,
+    input wire                     s0_v,
+
+    // CSR
+    input wire [9:0]               csr_asid_asid,
+    input wire                     csr_crmd_da_value,
+    input wire                     csr_crmd_pg_value,
 
     // Pipeline interface with ID stage
-    input   wire        id_allowin,
-    output  wire        if_to_id_valid,
-    input   wire        br_stall,
-    input   wire        br_taken,
-    input   wire [31:0] br_target,
-    output  wire [`IF2ID_LEN - 1:0] if_to_id_zip
+    input wire                     id_allowin,
+    output wire                    if_to_id_valid,
+    input wire                     br_stall,
+    input wire                     br_taken,
+    input wire [31:0]              br_target,
+    output wire [`IF2ID_LEN - 1:0] if_to_id_zip
 );
 
     // Pipeline control signals
@@ -39,8 +56,6 @@ module IFU(
     wire [31:0] next_pc;   // next PC to fetch
     
     // Exception detection
-    wire if_ex_adef;       // Address error for instruction fetch
-    wire if_ex_valid;      // Exception valid
     wire [5:0]  if_ecode;
     wire [8:0]  if_esubcode;
     wire        if_is_ertn;
@@ -56,7 +71,8 @@ module IFU(
     wire        req_handshake;    // req & addr_ok
 
     // Request handshake: only send request when IF allows in (simplified design)
-    assign inst_sram_req = if_allowin & resetn & ~br_stall;
+    assign inst_sram_req = if_allowin & resetn & ~br_stall &
+                           (csr_crmd_da_value | (s0_found & s0_v));
     assign req_handshake = inst_sram_req & inst_sram_addr_ok;
     assign pre_if_ready_go = req_handshake;
 
@@ -144,10 +160,18 @@ module IFU(
             if_pc <= next_pc;
     end
 
+    // va = next_pc
+    assign s0_vppn = next_pc[31:13];
+    assign s0_va_bit12 = next_pc[12];
+    assign s0_asid = csr_asid_asid;
+
+    wire [31:0] paddr = csr_crmd_pg_value ? {s0_ppn, next_pc[11:0]} : next_pc;
+    
+
     // Instruction SRAM-like interface
     assign inst_sram_wr = 1'b0;           // Never write instruction
     assign inst_sram_size = 2'b10;        // Always 4 bytes for instruction
-    assign inst_sram_addr = next_pc;
+    assign inst_sram_addr = paddr;
     assign inst_sram_wstrb = 4'b0;
     assign inst_sram_wdata = 32'b0;
 
@@ -156,11 +180,19 @@ module IFU(
 
     // Exception detection: ADEF - Address error for instruction fetch
     // PC must be word-aligned (lowest 2 bits must be 00)
-    assign if_ex_adef = (if_pc[1:0] != 2'b00);
-    assign if_ex_valid = if_ex_adef;
-    assign if_ecode = if_ex_adef ? `ECODE_ADE : 6'd0;
-    assign if_esubcode = if_ex_adef ? `ESUBCODE_ADEF : 9'd0;
-    assign if_is_ertn = 1'b0;
+    wire if_ex_adef = (if_pc[1:0] != 2'b00);
+    // TLB Refill
+    wire if_ex_tlbr = csr_crmd_pg_value & !s0_found;
+    // Fetch Page Invalid
+    wire if_ex_pif  = csr_crmd_pg_value & s0_found && !s0_v;
+    // TLB Invalid
+    wire if_ex_valid = if_ex_adef | if_ex_tlbr | if_ex_pif;
+    assign if_ecode    = if_ex_adef ? `ECODE_ADE  :
+                         if_ex_tlbr ? `ECODE_TLBR :
+                         if_ex_pif  ? `ECODE_PIF  :
+                         6'd0;
+    assign if_esubcode = 9'd0;
+    assign if_is_ertn  = 1'b0;
 
     // Pack exception fields: {ex_valid, ecode[5:0], esubcode[8:0], is_ertn}
     wire [`EX_FIELDS_LEN-1:0] if_ex_fields = {if_ex_valid, if_ecode, if_esubcode, if_is_ertn};

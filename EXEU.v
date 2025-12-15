@@ -1,52 +1,59 @@
 `include "macros.h"
 module EXEU(
-    input  wire        clk,
-    input  wire        resetn,
+    input wire                       clk,
+    input wire                       resetn,
 
     // Global flush from WB (exception/ertn)
-    input  wire        flush,
+    input wire                       flush,
 
     // Pipeline interface with ID stage
-    output wire        exe_allowin,
-    input  wire        id_to_exe_valid,
-    input  wire [`ID2EXE_LEN - 1:0] id_to_exe_zip,
+    output wire                      exe_allowin,
+    input wire                       id_to_exe_valid,
+    input wire [`ID2EXE_LEN - 1:0]   id_to_exe_zip,
 
     // Pipeline interface with MEM stage
-    input  wire        mem_allowin,
-    output wire        exe_to_mem_valid,
+    input wire                       mem_allowin,
+    output wire                      exe_to_mem_valid,
     output wire [`EXE2MEM_LEN - 1:0] exe_to_mem_zip,
 
     // Data SRAM-like interface
-    output wire        data_sram_req,
-    output wire        data_sram_wr,
-    output wire [ 1:0] data_sram_size,
-    output wire [31:0] data_sram_addr,
-    output wire [ 3:0] data_sram_wstrb,
-    output wire [31:0] data_sram_wdata,
-    input  wire        data_sram_addr_ok,
+    output wire                      data_sram_req,
+    output wire                      data_sram_wr,
+    output wire [ 1:0]               data_sram_size,
+    output wire [31:0]               data_sram_addr,
+    output wire [ 3:0]               data_sram_wstrb,
+    output wire [31:0]               data_sram_wdata,
+    input wire                       data_sram_addr_ok,
 
     // Data forwarding to ID stage
-    output wire [39:0] exe_rf_zip,     // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
+    output wire [39:0]               exe_rf_zip, // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
 
     // Exception signal forwarding from MEM and WB stage
-    input wire         mem_ex,
-    input wire         wb_ex,
+    input wire                       mem_ex,
+    input wire                       wb_ex,
 
     // CSR helper signals
-    input  wire [18:0] csr_tlbehi_vppn,
-    input  wire [9:0]  csr_asid_asid,
+    input wire [18:0]                csr_tlbehi_vppn,
+    input wire [9:0]                 csr_asid_asid,
+    input wire                       csr_crmd_da_value,
+    input wire                       csr_crmd_pg_value,
+    input wire [1:0]                 csr_crmd_plv_value,
 
-    // TLB search result from TLB module (port 1)
-    input  wire        tlb_s1_found,
-    input  wire [3:0]  tlb_s1_index,
-    input  wire [5:0]  tlb_s1_ps,
-
-    // TLB search / INVTLB requests to TLB module (port 1)
-    output wire [18:0] tlb_s1_vppn,
-    output wire        tlb_s1_va_bit12,
-    output wire [9:0]  tlb_s1_asid,
-    output wire        tlb_invtlb_valid,
-    output wire [4:0]  tlb_invtlb_op
+    // TLB related (Port 1)
+    output wire [18:0]               s1_vppn,
+    output wire                      s1_va_bit12,
+    output wire [9:0]                s1_asid,
+    input wire                       s1_found,
+    input wire [3:0]                 s1_index,
+    input wire [19:0]                s1_ppn,
+    input wire [5:0]                 s1_ps,
+    input wire [1:0]                 s1_plv,
+    input wire [1:0]                 s1_mat,
+    input wire                       s1_d,
+    input wire                       s1_v,
+    // TLB invalid
+    output wire                      tlb_invtlb_valid,
+    output wire [4:0]                tlb_invtlb_op
 );
 
     // Pipeline control
@@ -162,6 +169,8 @@ module EXEU(
             start_exe <= 1'b0;
     end
 
+    // Address Translation
+    wire [31:0] paddr = csr_crmd_pg_value ? {s1_ppn, exe_alu_result[11:0]} : exe_alu_result;
 
     // Exception generation
     // Address alignment check for memory operations
@@ -169,13 +178,28 @@ module EXEU(
     wire is_half_op = (exe_mem_op == 4'd1) | (exe_mem_op == 4'd5) | (exe_mem_op == 4'd9); // ld.h, st.h, ld.hu
     wire is_word_op = (exe_mem_op == 4'd2) | (exe_mem_op == 4'd6); // ld.w, st.w
     
-    wire addr_align_error = is_mem_op & (
-                           (is_half_op & exe_alu_result[0]) |        // Half-word must be 2-byte aligned
-                           (is_word_op & (|exe_alu_result[1:0]))     // Word must be 4-byte aligned
-                           );
+    wire addr_align_error    = is_mem_op & ((is_half_op & paddr[0]) |        // Half-word must be 2-byte aligned
+                                            (is_word_op & (|paddr[1:0]))     // Word must be 4-byte aligned
+                                            );
+    wire tlb_gen_error       = is_mem_op & csr_crmd_pg_value;
+    wire tlb_refill_error    = tlb_gen_error & !s1_found;
+    wire load_invalid_error  = tlb_gen_error & !is_store & s1_found & !s1_v;
+    wire store_invalid_error = tlb_gen_error &  is_store & s1_found & !s1_v;
+    wire tlb_plv_error       = tlb_gen_error & s1_found & s1_v & (csr_crmd_plv_value > s1_plv);
+    wire tlb_modify_error    = tlb_gen_error & s1_found & s1_v & is_store & !s1_d;
     
-    wire        exe_gen_ex_valid = addr_align_error;
-    wire [5:0]  exe_gen_ecode    = addr_align_error ? `ECODE_ALE : 6'd0;
+    wire        exe_gen_ex_valid =
+                addr_align_error   | tlb_refill_error    |
+                load_invalid_error | store_invalid_error |
+                tlb_plv_error      | tlb_modify_error;
+    wire [5:0]  exe_gen_ecode    =
+                addr_align_error    ? `ECODE_ALE  :
+                tlb_refill_error    ? `ECODE_TLBR :
+                load_invalid_error  ? `ECODE_PIL  :
+                store_invalid_error ? `ECODE_PIS  :
+                tlb_plv_error       ? `ECODE_PPI  :
+                tlb_modify_error    ? `ECODE_PME  :
+                6'd0;
     wire [8:0]  exe_gen_esubcode = `ESUBCODE_NONE;
 
     wire        exe_to_mem_ex_valid = exe_gen_ex_valid ? 1'b1 : exe_ex_valid;
@@ -256,20 +280,26 @@ module EXEU(
                           exe_alu_result;                              // Regular ALU result
 
     // TLB search / INVTLB interface (port 1)
-    assign tlb_s1_vppn    = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
-                            (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] : 19'd0;
-    assign tlb_s1_va_bit12= (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0 :
-                            (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] : 1'b0;
-    assign tlb_s1_asid    = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
-                            (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] : 10'd0;
+    assign s1_vppn     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
+                         (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] :
+                         is_mem_op                    ? exe_alu_result[31:13] :
+                         19'd0;
+    assign s1_va_bit12 = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0 :
+                         (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] :
+                         is_mem_op                    ? exe_alu_result[12] :
+                         1'b0;
+    assign s1_asid     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
+                         (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] :
+                         is_mem_op                    ? csr_asid_asid :
+                         10'd0;
     assign tlb_invtlb_op  = exe_invtlb_op;
     assign tlb_invtlb_valid = exe_to_mem_valid & (exe_tlb_op == `TLB_OP_INV);
 
     // Data SRAM-like interface
-    wire addr0 = (exe_alu_result[1:0] == 2'd0);
-    wire addr1 = (exe_alu_result[1:0] == 2'd1);
-    wire addr2 = (exe_alu_result[1:0] == 2'd2);
-    wire addr3 = (exe_alu_result[1:0] == 2'd3);
+    wire addr0 = (paddr[1:0] == 2'd0);
+    wire addr1 = (paddr[1:0] == 2'd1);
+    wire addr2 = (paddr[1:0] == 2'd2);
+    wire addr3 = (paddr[1:0] == 2'd3);
 
     wire is_byte_op = (exe_mem_op == 4'd0) | (exe_mem_op == 4'd4) | (exe_mem_op == 4'd8);  // ld.b, st.b, ld.bu
     wire is_store = exe_mem_op[2];  // st.b, st.h, st.w
@@ -299,7 +329,7 @@ module EXEU(
                                // st.w
                                (exe_mem_op == 4'd6) ?
                                ( 4'b1111 ) : 4'b0000;
-    assign data_sram_addr   = exe_alu_result;
+    assign data_sram_addr   = paddr;
     assign data_sram_wdata  = // st.b
                               (exe_mem_op == 4'd4) ?
                               ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
@@ -321,7 +351,7 @@ module EXEU(
     // CSR value adjustment for TLB search
     // TLBSRCH only updates NE (bit 31) and Index (bit 3:0), PS field is preserved
     // Use combinational signals directly from TLB module, not pipeline registers
-    wire [31:0] tlbsrch_wvalue = {~tlb_s1_found, 7'd0, 20'd0, tlb_s1_index};
+    wire [31:0] tlbsrch_wvalue = {~s1_found, 7'd0, 20'd0, s1_index};
     wire [31:0] tlbsrch_wmask  = 32'h8000_000f;  // Only update bit 31 (NE) and bit 3:0 (Index)
     wire [13:0] exe_csr_num_final    = (exe_tlb_op == `TLB_OP_SRCH) ? `CSR_TLBIDX : exe_csr_num;
     wire        exe_csr_we_final     = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b1        : exe_csr_we;

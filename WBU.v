@@ -166,23 +166,23 @@ module WBU(
     wire        wb_forward_ok = wb_valid & ~wb_ex_raw;
 
     // TLB helper signals
-    wire wb_do_tlbrd   = wb_forward_ok & (wb_tlb_op == `TLB_OP_RD);
-    wire wb_do_tlbwr   = wb_forward_ok & (wb_tlb_op == `TLB_OP_WR);
-    wire wb_do_tlbfill = wb_forward_ok & (wb_tlb_op == `TLB_OP_FILL);
-    wire tlbelo0_v     = csr_tlbelo0_value[`CSR_TLBELO_V];
-    wire tlbelo0_d     = csr_tlbelo0_value[`CSR_TLBELO_D];
-    wire [1:0] tlbelo0_plv = csr_tlbelo0_value[`CSR_TLBELO_PLV];
-    wire [1:0] tlbelo0_mat = csr_tlbelo0_value[`CSR_TLBELO_MAT];
-    wire tlbelo0_g     = csr_tlbelo0_value[`CSR_TLBELO_G];
-    wire [19:0] tlbelo0_ppn = csr_tlbelo0_value[`CSR_TLBELO_PPN];
-    wire tlbelo1_v     = csr_tlbelo1_value[`CSR_TLBELO_V];
-    wire tlbelo1_d     = csr_tlbelo1_value[`CSR_TLBELO_D];
-    wire [1:0] tlbelo1_plv = csr_tlbelo1_value[`CSR_TLBELO_PLV];
-    wire [1:0] tlbelo1_mat = csr_tlbelo1_value[`CSR_TLBELO_MAT];
-    wire tlbelo1_g     = csr_tlbelo1_value[`CSR_TLBELO_G];
-    wire [19:0] tlbelo1_ppn = csr_tlbelo1_value[`CSR_TLBELO_PPN];
-    wire tlb_w_g_int   = tlbelo0_g & tlbelo1_g;
-    wire [9:0] csr_asid_asid = csr_asid_value[`CSR_ASID_ASID];
+    wire        wb_do_tlbrd   = wb_forward_ok & (wb_tlb_op == `TLB_OP_RD);
+    wire        wb_do_tlbwr   = wb_forward_ok & (wb_tlb_op == `TLB_OP_WR);
+    wire        wb_do_tlbfill = wb_forward_ok & (wb_tlb_op == `TLB_OP_FILL);
+    wire        tlbelo0_v     = csr_tlbelo0_value[`CSR_TLBELO_V];
+    wire        tlbelo0_d     = csr_tlbelo0_value[`CSR_TLBELO_D];
+    wire [1:0]  tlbelo0_plv   = csr_tlbelo0_value[`CSR_TLBELO_PLV];
+    wire [1:0]  tlbelo0_mat   = csr_tlbelo0_value[`CSR_TLBELO_MAT];
+    wire        tlbelo0_g     = csr_tlbelo0_value[`CSR_TLBELO_G];
+    wire [19:0] tlbelo0_ppn   = csr_tlbelo0_value[`CSR_TLBELO_PPN];
+    wire        tlbelo1_v     = csr_tlbelo1_value[`CSR_TLBELO_V];
+    wire        tlbelo1_d     = csr_tlbelo1_value[`CSR_TLBELO_D];
+    wire [1:0]  tlbelo1_plv   = csr_tlbelo1_value[`CSR_TLBELO_PLV];
+    wire [1:0]  tlbelo1_mat   = csr_tlbelo1_value[`CSR_TLBELO_MAT];
+    wire        tlbelo1_g     = csr_tlbelo1_value[`CSR_TLBELO_G];
+    wire [19:0] tlbelo1_ppn   = csr_tlbelo1_value[`CSR_TLBELO_PPN];
+    wire        tlb_w_g_int   = tlbelo0_g & tlbelo1_g;
+    wire [9:0]  csr_asid_asid = csr_asid_value[`CSR_ASID_ASID];
 
     // TLBFILL pointer update
     always @(posedge clk) begin

@@ -19,15 +19,20 @@
 
     // ECODE definitions (for exp13)
     `define ECODE_INT  6'd0    // Interrupt
+    `define ECODE_PIL  6'd1    // Page Invalid Load
+    `define ECODE_PIS  6'd2    // Page Invalid Store
+    `define ECODE_PIF  6'd3    // Page Invalid Fetch
+    `define ECODE_PME  6'd4    // Page Modified
+    `define ECODE_PPI  6'd7    // Page Privilige Invalid
     `define ECODE_ADE  6'd8    // Address Error
     `define ECODE_ALE  6'd9    // Address aLignment Error  
     `define ECODE_SYS  6'd11   // System call
     `define ECODE_BRK  6'd12   // BReaK point
     `define ECODE_INE  6'd13   // Instruction Not Exist
+    `define ECODE_TLBR 6'd63   // TLB Refill
 
     // ESUBCODE definitions
     `define ESUBCODE_NONE  9'd0
-    `define ESUBCODE_ADEF  9'd0    // Address error for instruction fetch
 
     `define IF2ID_LEN (64 + `EX_FIELDS_LEN)    // {inst, pc, ex_fields}
     `define ID2EXE_LEN (158 + `CNT_INST_FIELDS_LEN +`CSR_FIELDS_LEN + `EX_FIELDS_LEN + `ID_TLB_FIELDS_LEN)  // {..., ex_fields, tlb}
@@ -40,6 +45,8 @@
     `define CSR_CRMD_IE     2
     `define CSR_CRMD_DA     3
     `define CSR_CRMD_PG     4
+    `define CSR_CRMD_DATF   6:5
+    `define CSR_CRMD_DATM   8:7
 
     `define CSR_PRMD        1
     `define CSR_PRMD_PPLV   1:0
