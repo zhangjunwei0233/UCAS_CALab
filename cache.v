@@ -13,6 +13,7 @@ module cache(
     input  wire [ 3:0] offset,      // vaddr[3:0] offset
     input  wire [ 3:0] wstrb,       // Byte write enable
     input  wire [31:0] wdata,       // Write data
+    input  wire        uncache,     // Uncached access flag
     
     output wire        addr_ok,     // Address transfer completion signal
     output wire        data_ok,     // Data transfer completion signal
@@ -213,6 +214,7 @@ module cache(
     reg [ 3:0] req_offset;
     reg [ 3:0] req_wstrb;
     reg [31:0] req_wdata;
+    reg        req_uncache;
 
     // Miss Buffer
     reg [ 1:0] refill_word_cnt;     // Count of words returned
@@ -252,9 +254,9 @@ module cache(
     assign way0_d = dirty_way0[req_index];
     assign way1_d = dirty_way1[req_index];
 
-    assign way0_hit = way0_v && (way0_tag == req_tag);
-    assign way1_hit = way1_v && (way1_tag == req_tag);
-    assign cache_hit = way0_hit || way1_hit;
+    assign way0_hit = way0_v && (way0_tag == req_tag) && !req_uncache;
+    assign way1_hit = way1_v && (way1_tag == req_tag) && !req_uncache;
+    assign cache_hit = (way0_hit || way1_hit) && !req_uncache;
 
     // Data Select
     wire [127:0] way0_load_block;
@@ -404,19 +406,21 @@ module cache(
     // Request Buffer update
     always @(posedge clk) begin
         if (~resetn) begin
-            req_op     <= 1'b0;
-            req_index  <= 8'b0;
-            req_tag    <= 20'b0;
-            req_offset <= 4'b0;
-            req_wstrb  <= 4'b0;
-            req_wdata  <= 32'b0;
+            req_op      <= 1'b0;
+            req_index   <= 8'b0;
+            req_tag     <= 20'b0;
+            req_offset  <= 4'b0;
+            req_wstrb   <= 4'b0;
+            req_wdata   <= 32'b0;
+            req_uncache <= 1'b0;
         end else if (lookup) begin
-            req_op     <= op;
-            req_index  <= index;
-            req_tag    <= tag;
-            req_offset <= offset;
-            req_wstrb  <= wstrb;
-            req_wdata  <= wdata;
+            req_op      <= op;
+            req_index   <= index;
+            req_tag     <= tag;
+            req_offset  <= offset;
+            req_wstrb   <= wstrb;
+            req_wdata   <= wdata;
+            req_uncache <= uncache;
         end
     end
 
@@ -475,9 +479,9 @@ module cache(
     assign tagv_way1_en = lookup_en || ((replace || refill) && (replace_way == 1'b1));
     
     assign tagv_way0_we = refill && (replace_way == 1'b0) && ret_valid && 
-                          (refill_word_cnt == req_offset[3:2]);
+                          (refill_word_cnt == req_offset[3:2]) && !req_uncache;
     assign tagv_way1_we = refill && (replace_way == 1'b1) && ret_valid && 
-                          (refill_word_cnt == req_offset[3:2]);
+                          (refill_word_cnt == req_offset[3:2]) && !req_uncache;
     
     assign tagv_wdata = {req_tag, 1'b1};
     assign tagv_addr = lookup_en ? index : req_index;
@@ -513,23 +517,23 @@ module cache(
 
     // Way 0 Bank write enable
     assign data_way0_bank0_we = {4{hitwrite && (write_way == 1'b0) && (write_bank == 2'b00)}} & write_strb |
-                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b00) && ret_valid}};
+                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b00) && ret_valid && !req_uncache}};
     assign data_way0_bank1_we = {4{hitwrite && (write_way == 1'b0) && (write_bank == 2'b01)}} & write_strb |
-                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b01) && ret_valid}};
+                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b01) && ret_valid && !req_uncache}};
     assign data_way0_bank2_we = {4{hitwrite && (write_way == 1'b0) && (write_bank == 2'b10)}} & write_strb |
-                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b10) && ret_valid}};
+                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b10) && ret_valid && !req_uncache}};
     assign data_way0_bank3_we = {4{hitwrite && (write_way == 1'b0) && (write_bank == 2'b11)}} & write_strb |
-                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b11) && ret_valid}};
+                                {4{refill && (replace_way == 1'b0) && (refill_word_cnt == 2'b11) && ret_valid && !req_uncache}};
 
     // Way 1 Bank write enable
     assign data_way1_bank0_we = {4{hitwrite && (write_way == 1'b1) && (write_bank == 2'b00)}} & write_strb |
-                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b00) && ret_valid}};
+                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b00) && ret_valid && !req_uncache}};
     assign data_way1_bank1_we = {4{hitwrite && (write_way == 1'b1) && (write_bank == 2'b01)}} & write_strb |
-                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b01) && ret_valid}};
+                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b01) && ret_valid && !req_uncache}};
     assign data_way1_bank2_we = {4{hitwrite && (write_way == 1'b1) && (write_bank == 2'b10)}} & write_strb |
-                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b10) && ret_valid}};
+                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b10) && ret_valid && !req_uncache}};
     assign data_way1_bank3_we = {4{hitwrite && (write_way == 1'b1) && (write_bank == 2'b11)}} & write_strb |
-                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b11) && ret_valid}};
+                                {4{refill && (replace_way == 1'b1) && (refill_word_cnt == 2'b11) && ret_valid && !req_uncache}};
 
     // DATA address and data
     assign data_wdata = refill ? refill_word :
@@ -550,7 +554,7 @@ module cache(
                 end else if (way1_hit) begin
                     dirty_way1[write_index] <= 1'b1;
                 end
-            end else if (refill && ret_valid && (refill_word_cnt == req_offset[3:2])) begin
+            end else if (refill && ret_valid && (refill_word_cnt == req_offset[3:2]) && !req_uncache) begin
                 if (replace_way == 1'b0) begin
                     dirty_way0[req_index] <= req_op;  // Set to 1 for write operation, set to 0 for read operation
                 end else begin
@@ -567,16 +571,18 @@ module cache(
 
     assign data_ok = ((main_state == STATE_LOOKUP) && (cache_hit || (req_op == OP_WRITE))) ||
                      ((main_state == STATE_REFILL) && ret_valid && 
-                      (refill_word_cnt == req_offset[3:2]) && (req_op == OP_READ));
+                      ((req_uncache && (req_op == OP_READ)) ||  // Uncache: return immediately
+                       (!req_uncache && (refill_word_cnt == req_offset[3:2]) && (req_op == OP_READ))));
 
     assign rdata = load_result;
 
     // Cache --> AXI output signals
     assign rd_req  = (main_state == STATE_REPLACE);
-    assign rd_type = RD_TYPE_BLOCK;
-    assign rd_addr = {req_tag, req_index, 4'b0};
+    assign rd_type = req_uncache ? RD_TYPE_WORD : RD_TYPE_BLOCK;  // Uncache uses word access
+    assign rd_addr = req_uncache ? {req_tag, req_index, req_offset} :  // Full address for uncache
+                                    {req_tag, req_index, 4'b0};          // Cache line address
 
-    assign wr_req   = (main_state == STATE_MISS) && replace_dirty;
+    assign wr_req   = (main_state == STATE_MISS) && replace_dirty && !req_uncache;
     assign wr_type  = WR_TYPE_BLOCK;
     assign wr_addr  = replace_way ? {way1_tag, req_index, 4'b0} : 
                                     {way0_tag, req_index, 4'b0};

@@ -76,6 +76,14 @@ module mycpu_top
     wire        wb_ex;
     wire        mem_ex;
 
+    // CSR forwarding
+    wire        mem_csr_we_fwd;
+    wire [13:0] mem_csr_num_fwd;
+    wire [31:0] mem_csr_wvalue_fwd;
+    wire        wb_csr_we_fwd;
+    wire [13:0] wb_csr_num_fwd;
+    wire [31:0] wb_csr_wvalue_fwd;
+
     // Brach resolving
     wire        br_stall;
     wire        br_taken;
@@ -156,6 +164,9 @@ module mycpu_top
     wire        csr_tlbrd_en;
 
     wire                clk;                    // From my_bridge of bridge.v
+    wire                resetn;                 // From my_bridge of bridge.v
+    
+    // Data SRAM interface wires
     wire [31:0]         data_sram_addr;         // From my_exeu of EXEU.v
     wire                data_sram_addr_ok;      // From my_bridge of bridge.v
     wire                data_sram_data_ok;      // From my_bridge of bridge.v
@@ -165,16 +176,29 @@ module mycpu_top
     wire [31:0]         data_sram_wdata;        // From my_exeu of EXEU.v
     wire                data_sram_wr;           // From my_exeu of EXEU.v
     wire [3:0]          data_sram_wstrb;        // From my_exeu of EXEU.v
-    wire [31:0]         inst_sram_addr;         // From my_ifu of IFU.v
-    wire                inst_sram_addr_ok;      // From my_bridge of bridge.v
-    wire                inst_sram_data_ok;      // From my_bridge of bridge.v
-    wire [31:0]         inst_sram_rdata;        // From my_bridge of bridge.v
-    wire                inst_sram_req;          // From my_ifu of IFU.v
-    wire [1:0]          inst_sram_size;         // From my_ifu of IFU.v
-    wire [31:0]         inst_sram_wdata;        // From my_ifu of IFU.v
-    wire                inst_sram_wr;           // From my_ifu of IFU.v
-    wire [3:0]          inst_sram_wstrb;        // From my_ifu of IFU.v
-    wire                resetn;                 // From my_bridge of bridge.v
+    
+    // ICache interface wires (IFU <-> ICache)
+    wire                inst_valid;             // From my_ifu of IFU.v
+    wire                inst_op;                // From my_ifu of IFU.v
+    wire [7:0]          inst_index;             // From my_ifu of IFU.v
+    wire [19:0]         inst_tag;               // From my_ifu of IFU.v
+    wire [3:0]          inst_offset;            // From my_ifu of IFU.v
+    wire [3:0]          inst_wstrb;             // From my_ifu of IFU.v
+    wire [31:0]         inst_wdata;             // From my_ifu of IFU.v
+    wire                inst_uncache;           // From my_ifu of IFU.v
+    wire                inst_addr_ok;           // From icache of cache.v
+    wire                inst_data_ok;           // From icache of cache.v
+    wire [31:0]         inst_rdata;             // From icache of cache.v
+    
+    // ICache-Bridge interface wires
+    wire                icache_rd_req;          // From icache of cache.v
+    wire [2:0]          icache_rd_type;         // From icache of cache.v
+    wire [31:0]         icache_rd_addr;         // From icache of cache.v
+    wire                icache_rd_rdy;          // From my_bridge of bridge.v
+    wire                icache_ret_valid;       // From my_bridge of bridge.v
+    wire                icache_ret_last;        // From my_bridge of bridge.v
+    wire [31:0]         icache_ret_data;        // From my_bridge of bridge.v
+    wire                icache_wr_rdy;          // From my_bridge of bridge.v
 
     wire [9:0]          s0_asid;                // From my_ifu of IFU.v
     wire                s0_d;                   // From u_tlb of tlb.v
@@ -204,13 +228,46 @@ module mycpu_top
     wire [31:0]         csr_dmw0_value;         // From u_csr of CSR.v
     wire [31:0]         csr_dmw1_value;         // From u_csr of CSR.v
     
+    // ICache instance
+    cache icache(
+        // Outputs
+        .addr_ok           (inst_addr_ok),
+        .data_ok           (inst_data_ok),
+        .rdata             (inst_rdata[31:0]),
+        .rd_req            (icache_rd_req),
+        .rd_type           (icache_rd_type[2:0]),
+        .rd_addr           (icache_rd_addr[31:0]),
+        .wr_req            (),              // ICache never writes
+        .wr_type           (),
+        .wr_addr           (),
+        .wr_wstrb          (),
+        .wr_data           (),
+        // Inputs
+        .clk               (clk),
+        .resetn            (resetn),
+        .valid             (inst_valid),
+        .op                (inst_op),
+        .index             (inst_index[7:0]),
+        .tag               (inst_tag[19:0]),
+        .offset            (inst_offset[3:0]),
+        .wstrb             (inst_wstrb[3:0]),
+        .wdata             (inst_wdata[31:0]),
+        .uncache           (inst_uncache),
+        .rd_rdy            (icache_rd_rdy),
+        .ret_valid         (icache_ret_valid),
+        .ret_last          (icache_ret_last),
+        .ret_data          (icache_ret_data[31:0]),
+        .wr_rdy            (icache_wr_rdy));
+
     bridge my_bridge(
         // Outputs
         .clk               (clk),
         .resetn            (resetn),
-        .inst_sram_addr_ok (inst_sram_addr_ok),
-        .inst_sram_data_ok (inst_sram_data_ok),
-        .inst_sram_rdata   (inst_sram_rdata[31:0]),
+        .icache_rd_rdy     (icache_rd_rdy),
+        .icache_ret_valid  (icache_ret_valid),
+        .icache_ret_last   (icache_ret_last),
+        .icache_ret_data   (icache_ret_data[31:0]),
+        .icache_wr_rdy     (icache_wr_rdy),
         .data_sram_addr_ok (data_sram_addr_ok),
         .data_sram_data_ok (data_sram_data_ok),
         .data_sram_rdata   (data_sram_rdata[31:0]),
@@ -240,12 +297,9 @@ module mycpu_top
         .wvalid            (wvalid),
         .bready            (bready),
         // Inputs
-        .inst_sram_req     (inst_sram_req),
-        .inst_sram_wr      (inst_sram_wr),
-        .inst_sram_size    (inst_sram_size[1:0]),
-        .inst_sram_addr    (inst_sram_addr[31:0]),
-        .inst_sram_wstrb   (inst_sram_wstrb[3:0]),
-        .inst_sram_wdata   (inst_sram_wdata[31:0]),
+        .icache_rd_req     (icache_rd_req),
+        .icache_rd_type    (icache_rd_type[2:0]),
+        .icache_rd_addr    (icache_rd_addr[31:0]),
         .data_sram_req     (data_sram_req),
         .data_sram_wr      (data_sram_wr),
         .data_sram_size    (data_sram_size[1:0]),
@@ -268,12 +322,14 @@ module mycpu_top
 
     IFU my_ifu(/*AUTOINST*/
                // Outputs
-               .inst_sram_req           (inst_sram_req),
-               .inst_sram_wr            (inst_sram_wr),
-               .inst_sram_size          (inst_sram_size[1:0]),
-               .inst_sram_addr          (inst_sram_addr[31:0]),
-               .inst_sram_wstrb         (inst_sram_wstrb[3:0]),
-               .inst_sram_wdata         (inst_sram_wdata[31:0]),
+               .inst_valid              (inst_valid),
+               .inst_op                 (inst_op),
+               .inst_index              (inst_index[7:0]),
+               .inst_tag                (inst_tag[19:0]),
+               .inst_offset             (inst_offset[3:0]),
+               .inst_wstrb              (inst_wstrb[3:0]),
+               .inst_wdata              (inst_wdata[31:0]),
+               .inst_uncache            (inst_uncache),
                .s0_vppn                 (s0_vppn[18:0]),
                .s0_va_bit12             (s0_va_bit12),
                .s0_asid                 (s0_asid[9:0]),
@@ -284,9 +340,9 @@ module mycpu_top
                .resetn                  (resetn),
                .flush                   (flush),
                .flush_target            (flush_target[31:0]),
-               .inst_sram_addr_ok       (inst_sram_addr_ok),
-               .inst_sram_data_ok       (inst_sram_data_ok),
-               .inst_sram_rdata         (inst_sram_rdata[31:0]),
+               .inst_addr_ok            (inst_addr_ok),
+               .inst_data_ok            (inst_data_ok),
+               .inst_rdata              (inst_rdata[31:0]),
                .s0_found                (s0_found),
                .s0_index                (s0_index[3:0]),
                .s0_ppn                  (s0_ppn[19:0]),
@@ -353,6 +409,12 @@ module mycpu_top
                  .data_sram_addr_ok     (data_sram_addr_ok),
                  .mem_ex                (mem_ex),
                  .wb_ex                 (wb_ex),
+                 .mem_csr_we            (mem_csr_we_fwd),
+                 .mem_csr_num           (mem_csr_num_fwd),
+                 .mem_csr_wvalue        (mem_csr_wvalue_fwd),
+                 .wb_csr_we             (wb_csr_we_fwd),
+                 .wb_csr_num            (wb_csr_num_fwd),
+                 .wb_csr_wvalue         (wb_csr_wvalue_fwd),
                  .csr_tlbehi_vppn       (csr_tlbehi_vppn[18:0]),
                  .csr_asid_asid         (csr_asid_asid[9:0]),
                  .csr_crmd_da_value     (csr_crmd_da_value),
@@ -376,6 +438,9 @@ module mycpu_top
                  .mem_to_wb_zip         (mem_to_wb_zip[`MEM2WB_LEN-1:0]),
                  .mem_rf_zip            (mem_rf_zip[39:0]),
                  .mem_ex                (mem_ex),
+                 .mem_csr_we_fwd        (mem_csr_we_fwd),
+                 .mem_csr_num_fwd       (mem_csr_num_fwd),
+                 .mem_csr_wvalue_fwd    (mem_csr_wvalue_fwd),
                  // Inputs
                  .clk                   (clk),
                  .resetn                (resetn),
@@ -407,6 +472,9 @@ module mycpu_top
                .csr_wmask               (csr_wmask[31:0]),
                .csr_wvalue              (csr_wvalue[31:0]),
                .csr_re                  (csr_re),
+               .wb_csr_we_fwd           (wb_csr_we_fwd),
+               .wb_csr_num_fwd          (wb_csr_num_fwd),
+               .wb_csr_wvalue_fwd       (wb_csr_wvalue_fwd),
                .tlb_we                  (tlb_we),
                .tlb_w_index             (tlb_w_index[3:0]),
                .tlb_w_e                 (tlb_w_e),

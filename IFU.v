@@ -7,16 +7,18 @@ module IFU(
     input wire                     flush,
     input wire [31:0]              flush_target,
 
-    // Instruction SRAM-like interface
-    output wire                    inst_sram_req,
-    output wire                    inst_sram_wr,
-    output wire [ 1:0]             inst_sram_size,
-    output wire [31:0]             inst_sram_addr,
-    output wire [ 3:0]             inst_sram_wstrb,
-    output wire [31:0]             inst_sram_wdata,
-    input wire                     inst_sram_addr_ok,
-    input wire                     inst_sram_data_ok,
-    input wire [31:0]              inst_sram_rdata,
+    // Instruction Cache interface
+    output wire                    inst_valid,
+    output wire                    inst_op,
+    output wire [ 7:0]             inst_index,
+    output wire [19:0]             inst_tag,
+    output wire [ 3:0]             inst_offset,
+    output wire [ 3:0]             inst_wstrb,
+    output wire [31:0]             inst_wdata,
+    output wire                    inst_uncache,
+    input wire                     inst_addr_ok,
+    input wire                     inst_data_ok,
+    input wire [31:0]              inst_rdata,
 
     // TLB related (Port 0)
     output wire [18:0]             s0_vppn,
@@ -72,11 +74,11 @@ module IFU(
                         inst_buf_valid <= 1;
                         inst_buf       <= 32'h02800000;
                     end else begin
-                        req_sent <= inst_sram_addr_ok;
+                        req_sent <= inst_addr_ok;
                     end
-                end else if (inst_sram_data_ok) begin
+                end else if (inst_data_ok) begin
                     // We have sent the request, now handshaking
-                    inst_buf <= inst_sram_rdata;
+                    inst_buf <= inst_rdata;
                     req_sent <= 0;
 
                     if (!cancel) begin
@@ -112,15 +114,20 @@ module IFU(
 
     assign if_to_id_valid = (!flush && !br_taken) &&
                             (inst_buf_valid ||
-                             (req_sent && inst_sram_data_ok && !cancel));
+                             (req_sent && inst_data_ok && !cancel));
 
     // TLB
     assign s0_vppn     = if_pc[31:13];
     assign s0_va_bit12 = if_pc[12];
     assign s0_asid     = csr_asid_asid;
 
-    wire is_dmw0 = if_pc[31:29] == csr_dmw0_value[31:29];
-    wire is_dmw1 = if_pc[31:29] == csr_dmw1_value[31:29];
+    // DMW match: check both address segment and privilege level
+    wire dmw0_plv_ok = (csr_crmd_plv_value == 2'd0) ? csr_dmw0_value[0] : 
+                       (csr_crmd_plv_value == 2'd3) ? csr_dmw0_value[3] : 1'b0;
+    wire dmw1_plv_ok = (csr_crmd_plv_value == 2'd0) ? csr_dmw1_value[0] : 
+                       (csr_crmd_plv_value == 2'd3) ? csr_dmw1_value[3] : 1'b0;
+    wire is_dmw0 = dmw0_plv_ok && (if_pc[31:29] == csr_dmw0_value[31:29]);
+    wire is_dmw1 = dmw1_plv_ok && (if_pc[31:29] == csr_dmw1_value[31:29]);
     wire [31:0] paddr =
                 csr_crmd_pg_value ?
                 ( is_dmw0 ? {csr_dmw0_value[27:25], if_pc[28:0]} :
@@ -130,16 +137,33 @@ module IFU(
                     {s0_ppn[19:9], if_pc[20:0]} )
                  ) : if_pc;
 
-    // Instruction SRAM-like interface
-    assign inst_sram_req   = !inst_buf_valid & !req_sent;
-    assign inst_sram_wr    = 1'b0;    // Never write instruction
-    assign inst_sram_size  = 2'b10;   // Always 4 bytes for instruction
-    assign inst_sram_addr  = paddr;
-    assign inst_sram_wstrb = 4'b0;
-    assign inst_sram_wdata = 32'b0;
+    // Determine if access is cacheable (MAT field)
+    // MAT=0: SUC (Strong-ordered Uncached), MAT=1: CC (Coherent Cached)
+    // For ICache, storage type comes from:
+    // 1. Direct address translation (DA=1, PG=0): CRMD.DATF (2 bits)
+    // 2. Direct mapped window (PG=1, DMW hit): DMW.MAT (2 bits)
+    // 3. Page table mapped (PG=1, no DMW): TLB.MAT (2 bits)
+    wire [1:0] fetch_mat = 
+                !csr_crmd_pg_value ? 2'b01 :          // DA mode: cacheable by default
+                ( is_dmw0 ? csr_dmw0_value[5:4] :     // DMW0 MAT
+                  is_dmw1 ? csr_dmw1_value[5:4] :     // DMW1 MAT
+                  s0_mat                              // TLB MAT
+                );
+    
+    wire fetch_uncache = (fetch_mat == 2'b00);  // SUC (MAT=0): uncached
+
+    // Instruction Cache interface
+    assign inst_valid   = !inst_buf_valid & !req_sent;
+    assign inst_op      = 1'b0;               // Always read for instruction fetch
+    assign inst_index   = if_pc[11:4];        // Virtual address index (VIPT)
+    assign inst_tag     = paddr[31:12];       // Physical address tag
+    assign inst_offset  = if_pc[3:0];         // Offset
+    assign inst_wstrb   = 4'b0;               // No write
+    assign inst_wdata   = 32'b0;              // No write data
+    assign inst_uncache = fetch_uncache;      // Uncached access flag
 
     // Select instruction from buffer or current input
-    wire [31:0] if_inst = inst_buf_valid ? inst_buf : inst_sram_rdata;
+    wire [31:0] if_inst = inst_buf_valid ? inst_buf : inst_rdata;
 
     // Exception detection: ADEF - Address error for instruction fetch
     // PC must be word-aligned (lowest 2 bits must be 00)
