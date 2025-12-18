@@ -76,14 +76,6 @@ module mycpu_top
     wire        wb_ex;
     wire        mem_ex;
 
-    // CSR forwarding
-    wire        mem_csr_we_fwd;
-    wire [13:0] mem_csr_num_fwd;
-    wire [31:0] mem_csr_wvalue_fwd;
-    wire        wb_csr_we_fwd;
-    wire [13:0] wb_csr_num_fwd;
-    wire [31:0] wb_csr_wvalue_fwd;
-
     // Brach resolving
     wire        br_stall;
     wire        br_taken;
@@ -354,7 +346,7 @@ module mycpu_top
                .csr_asid_asid           (csr_asid_asid[9:0]),
                .csr_crmd_da_value       (csr_crmd_da_value),
                .csr_crmd_pg_value       (csr_crmd_pg_value),
-               .csr_crmd_plv_value      (csr_crmd_plv_value),
+               .csr_crmd_plv_value      (csr_crmd_plv_value[1:0]),
                .csr_dmw0_value          (csr_dmw0_value[31:0]),
                .csr_dmw1_value          (csr_dmw1_value[31:0]),
                .id_allowin              (id_allowin),
@@ -409,12 +401,6 @@ module mycpu_top
                  .data_sram_addr_ok     (data_sram_addr_ok),
                  .mem_ex                (mem_ex),
                  .wb_ex                 (wb_ex),
-                 .mem_csr_we            (mem_csr_we_fwd),
-                 .mem_csr_num           (mem_csr_num_fwd),
-                 .mem_csr_wvalue        (mem_csr_wvalue_fwd),
-                 .wb_csr_we             (wb_csr_we_fwd),
-                 .wb_csr_num            (wb_csr_num_fwd),
-                 .wb_csr_wvalue         (wb_csr_wvalue_fwd),
                  .csr_tlbehi_vppn       (csr_tlbehi_vppn[18:0]),
                  .csr_asid_asid         (csr_asid_asid[9:0]),
                  .csr_crmd_da_value     (csr_crmd_da_value),
@@ -438,9 +424,6 @@ module mycpu_top
                  .mem_to_wb_zip         (mem_to_wb_zip[`MEM2WB_LEN-1:0]),
                  .mem_rf_zip            (mem_rf_zip[39:0]),
                  .mem_ex                (mem_ex),
-                 .mem_csr_we_fwd        (mem_csr_we_fwd),
-                 .mem_csr_num_fwd       (mem_csr_num_fwd),
-                 .mem_csr_wvalue_fwd    (mem_csr_wvalue_fwd),
                  // Inputs
                  .clk                   (clk),
                  .resetn                (resetn),
@@ -472,9 +455,6 @@ module mycpu_top
                .csr_wmask               (csr_wmask[31:0]),
                .csr_wvalue              (csr_wvalue[31:0]),
                .csr_re                  (csr_re),
-               .wb_csr_we_fwd           (wb_csr_we_fwd),
-               .wb_csr_num_fwd          (wb_csr_num_fwd),
-               .wb_csr_wvalue_fwd       (wb_csr_wvalue_fwd),
                .tlb_we                  (tlb_we),
                .tlb_w_index             (tlb_w_index[3:0]),
                .tlb_w_e                 (tlb_w_e),

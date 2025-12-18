@@ -306,20 +306,32 @@ module IDU(
     wire id_ex_ine     = (~inst_known | invtlb_illegal) & id_valid; // Instruction not exist exception
     
     wire csr_tlb       =
-         (id_csr_num == `CSR_ASID) || (id_csr_num == `CSR_CRMD) ||
-         (id_csr_num == `CSR_DMW0) || (id_csr_num == `CSR_DMW1);
+         (id_csr_num == `CSR_ASID)    || (id_csr_num == `CSR_CRMD)    ||
+         (id_csr_num == `CSR_DMW0)    || (id_csr_num == `CSR_DMW1)    ||
+         (id_csr_num == `CSR_TLBIDX)  || (id_csr_num == `CSR_TLBEHI)  ||
+         (id_csr_num == `CSR_TLBELO0) || (id_csr_num == `CSR_TLBELO1);
     wire id_ex_refresh =
-         inst_tlbwr || inst_tlbfill || inst_invtlb ||
+         inst_tlbrd || inst_tlbwr || inst_tlbsrch || inst_tlbfill || inst_invtlb ||
          (inst_csrwr   && csr_tlb) ||
          (inst_csrxchg && csr_tlb);
     // Mark refresh on the first following instruction
+    reg  handshake_done;
+    always @(posedge clk) begin
+        if (if_to_id_valid && id_allowin) begin
+            handshake_done <= 1;
+        end else begin
+            handshake_done <= 0;
+        end
+    end
     reg  need_refresh;
     always @(posedge clk) begin
         if (!resetn) begin
             need_refresh <= 0;
         end else begin
-            if (id_to_exe_valid && exe_allowin) begin
-                if (need_refresh || flush) begin
+            if (flush) begin
+                need_refresh <= 0;
+            end else if (handshake_done) begin
+                if (need_refresh) begin
                     need_refresh <= 0;
                 end else if (id_ex_refresh) begin
                     need_refresh <= 1;

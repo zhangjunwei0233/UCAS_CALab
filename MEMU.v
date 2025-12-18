@@ -25,12 +25,7 @@ module MEMU(
 
     // Exception signal forwarding to EXE stage
     output wire        mem_ex,
-    input  wire        wb_ex,
-
-    // CSR forwarding to EXE stage
-    output wire        mem_csr_we_fwd,
-    output wire [13:0] mem_csr_num_fwd,
-    output wire [31:0] mem_csr_wvalue_fwd
+    input  wire        wb_ex
 );
     // Pipeline control
     wire        mem_ready_go;
@@ -104,11 +99,6 @@ module MEMU(
     // Exception forwarding to EXE stage
     assign mem_ex = mem_valid & (mem_to_wb_ex_valid | mem_to_wb_is_ertn);
 
-    // CSR forwarding to EXE stage
-    assign mem_csr_we_fwd     = mem_valid & mem_csr_we;
-    assign mem_csr_num_fwd    = mem_csr_num;
-    assign mem_csr_wvalue_fwd = mem_csr_wvalue;
-
     // Output assignment
     wire addr0 = (mem_alu_result[1:0] == 2'd0);
     wire addr1 = (mem_alu_result[1:0] == 2'd1);
@@ -148,7 +138,7 @@ module MEMU(
 
     // Data forwarding
     assign mem_rf_zip = {
-            mem_valid & mem_csr_read,
+            mem_valid & (mem_csr_read | mem_csr_we),
             mem_valid & mem_res_from_mem,
             mem_valid & mem_rf_we,
             mem_rf_waddr,

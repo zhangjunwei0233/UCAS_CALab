@@ -36,11 +36,6 @@ module WBU(
     output wire        csr_re,
     input  wire [31:0] csr_rvalue,
 
-    // CSR forwarding to EXE stage
-    output wire        wb_csr_we_fwd,
-    output wire [13:0] wb_csr_num_fwd,
-    output wire [31:0] wb_csr_wvalue_fwd,
-
     // CSR helper inputs for TLB operations
     input  wire [3:0]  csr_tlbidx_index,
     input  wire [5:0]  csr_tlbidx_ps,
@@ -202,7 +197,7 @@ module WBU(
     // Data forwarding
     wire [31:0] wb_wdata_final = wb_csr_read ? csr_rvalue : wb_rf_wdata;
     assign wb_rf_zip = {
-            wb_csr_read,
+            (wb_csr_read | wb_csr_we),
             wb_forward_ok ? wb_rf_we : 1'b0,
             wb_rf_waddr,
             wb_wdata_final
@@ -220,11 +215,6 @@ module WBU(
     assign csr_num    = wb_csr_num;
     assign csr_wmask  = wb_csr_wmask;
     assign csr_wvalue = wb_csr_wvalue;
-
-    // CSR forwarding to EXE stage
-    assign wb_csr_we_fwd     = wb_forward_ok & wb_csr_we;
-    assign wb_csr_num_fwd    = wb_csr_num;
-    assign wb_csr_wvalue_fwd = wb_csr_wvalue;
 
     // TLB write / read control
     assign csr_tlbrd_en = wb_do_tlbrd;

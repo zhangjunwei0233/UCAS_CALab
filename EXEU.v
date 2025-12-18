@@ -32,14 +32,6 @@ module EXEU(
     input wire                       mem_ex,
     input wire                       wb_ex,
 
-    // CSR forwarding from MEM and WB stages
-    input wire                       mem_csr_we,
-    input wire [13:0]                mem_csr_num,
-    input wire [31:0]                mem_csr_wvalue,
-    input wire                       wb_csr_we,
-    input wire [13:0]                wb_csr_num,
-    input wire [31:0]                wb_csr_wvalue,
-
     // CSR helper signals
     input wire [18:0]                csr_tlbehi_vppn,
     input wire [9:0]                 csr_asid_asid,
@@ -298,25 +290,8 @@ module EXEU(
                           exe_rdcntvh    ? stable_clk_counter[63:32] : // RDCNTVH: stable counter high 32 bits
                           exe_alu_result;                              // Regular ALU result
 
-    // CSR forwarding logic
-    // Check if MEM or WB stage is writing to TLBEHI or ASID
-    wire mem_wr_tlbehi = mem_csr_we && (mem_csr_num == `CSR_TLBEHI);
-    wire mem_wr_asid   = mem_csr_we && (mem_csr_num == `CSR_ASID);
-    wire wb_wr_tlbehi  = wb_csr_we  && (wb_csr_num  == `CSR_TLBEHI);
-    wire wb_wr_asid    = wb_csr_we  && (wb_csr_num  == `CSR_ASID);
-
-    // Forward TLBEHI.VPPN: prioritize MEM over WB over CSR
-    wire [18:0] forwarded_tlbehi_vppn = mem_wr_tlbehi ? mem_csr_wvalue[`CSR_TLBEHI_VPPN] :
-                                        wb_wr_tlbehi  ? wb_csr_wvalue[`CSR_TLBEHI_VPPN] :
-                                        csr_tlbehi_vppn;
-
-    // Forward ASID.ASID: prioritize MEM over WB over CSR
-    wire [9:0] forwarded_asid_asid = mem_wr_asid ? mem_csr_wvalue[`CSR_ASID_ASID] :
-                                     wb_wr_asid  ? wb_csr_wvalue[`CSR_ASID_ASID] :
-                                     csr_asid_asid;
-
     // TLB search / INVTLB interface (port 1)
-    assign s1_vppn     = (exe_tlb_op == `TLB_OP_SRCH) ? forwarded_tlbehi_vppn :
+    assign s1_vppn     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
                          (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] :
                          is_mem_op                    ? exe_alu_result[31:13] :
                          19'd0;
@@ -324,7 +299,7 @@ module EXEU(
                          (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] :
                          is_mem_op                    ? exe_alu_result[12] :
                          1'b0;
-    assign s1_asid     = (exe_tlb_op == `TLB_OP_SRCH) ? forwarded_asid_asid :
+    assign s1_asid     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
                          (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] :
                          is_mem_op                    ? csr_asid_asid :
                          10'd0;
@@ -397,7 +372,7 @@ module EXEU(
 
     // Forward data to IDU
     assign exe_rf_zip = {
-            exe_valid & exe_csr_read_final,
+            exe_valid & (exe_csr_read_final | exe_csr_we_final),
             exe_valid & exe_res_from_mem,
             exe_valid & exe_rf_we,
             exe_rf_waddr,
