@@ -305,12 +305,37 @@ module IDU(
     wire id_ex_break   = inst_break;            // Break point exception
     wire id_ex_ine     = (~inst_known | invtlb_illegal) & id_valid; // Instruction not exist exception
     
-    wire        id_ex_valid   = if_ex_valid | id_ex_int | id_ex_syscall | id_ex_break | id_ex_ine;
-    wire [5:0]  id_ecode      = if_ex_valid ? if_ecode :
-                                id_ex_int   ? `ECODE_INT :
-                                id_ex_syscall ? `ECODE_SYS :
-                                id_ex_break ? `ECODE_BRK :
-                                id_ex_ine   ? `ECODE_INE : 6'd0;
+    wire csr_tlb       =
+         (id_csr_num == `CSR_ASID) || (id_csr_num == `CSR_CRMD) ||
+         (id_csr_num == `CSR_DMW0) || (id_csr_num == `CSR_DMW1);
+    wire id_ex_refresh =
+         inst_tlbwr || inst_tlbfill || inst_invtlb ||
+         (inst_csrwr   && csr_tlb) ||
+         (inst_csrxchg && csr_tlb);
+    // Mark refresh on the first following instruction
+    reg  need_refresh;
+    always @(posedge clk) begin
+        if (!resetn) begin
+            need_refresh <= 0;
+        end else begin
+            if (id_to_exe_valid && exe_allowin) begin
+                if (need_refresh || flush) begin
+                    need_refresh <= 0;
+                end else if (id_ex_refresh) begin
+                    need_refresh <= 1;
+                end
+            end
+        end
+    end
+    
+    wire        id_ex_valid   = if_ex_valid | id_ex_int | id_ex_syscall | id_ex_break | id_ex_ine | need_refresh;
+    wire [5:0]  id_ecode      = if_ex_valid   ? if_ecode    :
+                                id_ex_int     ? `ECODE_INT  :
+                                id_ex_syscall ? `ECODE_SYS  :
+                                id_ex_break   ? `ECODE_BRK  :
+                                id_ex_ine     ? `ECODE_INE  :
+                                need_refresh  ? `ECODE_REFR :
+                                6'd0;
     wire [8:0]  id_esubcode   = if_ex_valid ? if_esubcode : `ESUBCODE_NONE;
     wire        id_is_ertn    = if_is_ertn | inst_ertn;
 

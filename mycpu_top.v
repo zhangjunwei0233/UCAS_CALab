@@ -648,5 +648,6 @@ module mycpu_top
     assign flush = wb_is_ertn | wb_ex_valid;
     assign flush_target = wb_is_ertn ? csr_era :
                           (wb_ecode == `ECODE_TLBR) ? csr_tlbren_value :
+                          (wb_ecode == `ECODE_REFR) ? wb_vaddr :
                           csr_ex_entry;
 endmodule
