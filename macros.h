@@ -30,6 +30,7 @@
     `define ECODE_BRK  6'd12   // BReaK point
     `define ECODE_INE  6'd13   // Instruction Not Exist
     `define ECODE_TLBR 6'd63   // TLB Refill
+    `define ECODE_REFR 6'd60   // Custom Refresh Exception
 
     // ESUBCODE definitions
     `define ESUBCODE_NONE  9'd0

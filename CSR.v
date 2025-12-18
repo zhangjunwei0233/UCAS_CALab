@@ -81,7 +81,7 @@ module CSR
             csr_crmd_pg  <= 1'b0;
             csr_crmd_datf <= 2'b0;
             csr_crmd_datm <= 2'b0;
-        end else if (wb_ex) begin
+        end else if (wb_ex && (wb_ecode != `ECODE_REFR)) begin
             csr_crmd_plv <= 2'b0;
             csr_crmd_ie  <= 1'b0;
             if (wb_ecode == `ECODE_TLBR) begin
@@ -119,7 +119,7 @@ module CSR
     reg [1:0] csr_prmd_pplv;
     reg       csr_prmd_pie;
     always @(posedge clk) begin
-        if (wb_ex) begin
+        if (wb_ex && (wb_ecode != `ECODE_REFR)) begin
             csr_prmd_pplv <= csr_crmd_plv;
             csr_prmd_pie  <= csr_crmd_ie;
         end else if (csr_we && csr_num == `CSR_PRMD) begin
@@ -171,7 +171,7 @@ module CSR
         end
         csr_estat_is[12] <= ipi_int_in;
 
-        if (wb_ex) begin
+        if (wb_ex && (wb_ecode != `ECODE_REFR)) begin
             csr_estat_ecode    <= wb_ecode;
             csr_estat_esubcode <= wb_esubcode;
         end
@@ -184,7 +184,7 @@ module CSR
     // ERA
     reg [31:0] csr_era_pc;
     always @(posedge clk) begin
-        if (wb_ex) begin
+        if (wb_ex && (wb_ecode != `ECODE_REFR)) begin
             csr_era_pc <= wb_pc;
         end else if (csr_we && csr_num == `CSR_ERA) begin
             csr_era_pc <= ( csr_wmask[`CSR_ERA_PC] & csr_wvalue[`CSR_ERA_PC]) |
