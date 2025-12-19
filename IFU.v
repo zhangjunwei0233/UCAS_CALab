@@ -38,6 +38,7 @@ module IFU(
     input wire                     csr_crmd_da_value,
     input wire                     csr_crmd_pg_value,
     input wire [1:0]               csr_crmd_plv_value,
+    input wire [1:0]               csr_crmd_datf_value,
     input wire [31:0]              csr_dmw0_value,
     input wire [31:0]              csr_dmw1_value,
 
@@ -144,7 +145,7 @@ module IFU(
     // 2. Direct mapped window (PG=1, DMW hit): DMW.MAT (2 bits)
     // 3. Page table mapped (PG=1, no DMW): TLB.MAT (2 bits)
     wire [1:0] fetch_mat = 
-                !csr_crmd_pg_value ? 2'b01 :          // DA mode: cacheable by default
+                !csr_crmd_pg_value ? csr_crmd_datf_value : // DA mode: cacheable by default
                 ( is_dmw0 ? csr_dmw0_value[5:4] :     // DMW0 MAT
                   is_dmw1 ? csr_dmw1_value[5:4] :     // DMW1 MAT
                   s0_mat                              // TLB MAT

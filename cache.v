@@ -318,7 +318,7 @@ module cache(
                 end
             end
             STATE_LOOKUP: begin
-                if (!cache_hit) begin
+                if (!cache_hit || req_uncache) begin
                     main_next_state = STATE_MISS;
                 end else if (!valid || conflict_case1 || conflict_case2) begin
                     main_next_state = STATE_IDLE;
@@ -327,7 +327,10 @@ module cache(
                 end
             end
             STATE_MISS: begin
-                if (wr_rdy || !replace_dirty) begin
+                if (req_uncache && req_op && wr_rdy) begin
+                    main_next_state = STATE_IDLE;
+                end else if (wr_rdy || (req_uncache && !req_op) ||
+                             (!req_uncache && !replace_dirty)) begin
                     main_next_state = STATE_REPLACE;
                 end else begin
                     main_next_state = STATE_MISS;
@@ -577,16 +580,17 @@ module cache(
     assign rdata = load_result;
 
     // Cache --> AXI output signals
-    assign rd_req  = (main_state == STATE_REPLACE);
+    assign rd_req  = (main_state == STATE_REPLACE) && (!req_uncache || !req_op);
     assign rd_type = req_uncache ? RD_TYPE_WORD : RD_TYPE_BLOCK;  // Uncache uses word access
     assign rd_addr = req_uncache ? {req_tag, req_index, req_offset} :  // Full address for uncache
                                     {req_tag, req_index, 4'b0};          // Cache line address
 
-    assign wr_req   = (main_state == STATE_MISS) && replace_dirty && !req_uncache;
-    assign wr_type  = WR_TYPE_BLOCK;
-    assign wr_addr  = replace_way ? {way1_tag, req_index, 4'b0} : 
+    assign wr_req   = (main_state == STATE_MISS) && (replace_dirty || (req_uncache && req_op));
+    assign wr_type  = req_uncache ? WR_TYPE_WORD : WR_TYPE_BLOCK;
+    assign wr_addr  = req_uncache ? {req_tag, req_index, req_offset}:
+                      replace_way ? {way1_tag, req_index, 4'b0} :
                                     {way0_tag, req_index, 4'b0};
-    assign wr_wstrb = 4'b1111;
-    assign wr_data  = replace_data;
+    assign wr_wstrb = req_uncache ? req_wstrb : 4'b1111;
+    assign wr_data  = req_uncache ? {96'd0, req_wdata} : replace_data;
 
 endmodule

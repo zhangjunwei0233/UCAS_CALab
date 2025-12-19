@@ -9,17 +9,21 @@ module bridge
     output wire        icache_ret_valid,
     output wire        icache_ret_last,
     output wire [31:0] icache_ret_data,
-    output wire        icache_wr_rdy,      // Always 1 for ICache (no write)
-    // data sram-like interface
-    input wire         data_sram_req,
-    input wire         data_sram_wr,
-    input wire [ 1:0]  data_sram_size,
-    input wire [31:0]  data_sram_addr,
-    input wire [ 3:0]  data_sram_wstrb,
-    input wire [31:0]  data_sram_wdata,
-    output wire        data_sram_addr_ok,
-    output wire        data_sram_data_ok,
-    output wire [31:0] data_sram_rdata,
+    output wire        icache_wr_rdy, // Always 1 for ICache (no write)
+    // DCache interface (Cache-AXI protocol)
+    input wire         dcache_rd_req,
+    input wire [ 2:0]  dcache_rd_type,
+    input wire [31:0]  dcache_rd_addr,
+    output wire        dcache_rd_rdy,
+    output wire        dcache_ret_valid,
+    output wire        dcache_ret_last,
+    output wire [31:0] dcache_ret_data,
+    input wire         dcache_wr_req,
+    input wire [ 2:0]  dcache_wr_type,
+    input wire [31:0]  dcache_wr_addr,
+    input wire [ 3:0]  dcache_wr_wstrb,
+    input wire [127:0] dcache_wr_data,
+    output wire        dcache_wr_rdy,
     // AXI
     input wire         aclk,
     input wire         aresetn,
@@ -87,23 +91,49 @@ module bridge
     wire      is_burst;
     wire      burst_finish;
     
-    assign is_burst = (grant == 2'd0) && (icache_rd_type == 3'b100); // Cache line read
+    assign is_burst = ((grant == 2'd0) && (icache_rd_type == 3'b100)) ||
+                      ((grant == 2'd1) && (dcache_rd_type == 3'b100)) ||
+                      ((grant == 2'd2) && (dcache_wr_type == 3'b100));   // Cache line read
     assign burst_finish = (burst_cnt == burst_len);
 
     // Request type decode for ICache
     wire [7:0] icache_arlen;
     wire [2:0] icache_arsize;
-    assign icache_arlen  = (icache_rd_type == 3'b100) ? 8'd3 :  // Cache line: 4 beats
+    assign icache_arlen  = (icache_rd_type == 3'b100) ? 8'd3   : // Cache line: 4 beats
                            8'd0;                                 // Single word
     assign icache_arsize = (icache_rd_type == 3'b100) ? 3'b010 : // 4 bytes per beat
                            (icache_rd_type == 3'b010) ? 3'b010 : // word
                            (icache_rd_type == 3'b001) ? 3'b001 : // halfword
-                           3'b000;                                // byte
+                           3'b000;                               // byte
+    // Request type decode for DCache
+    wire [7:0] dcache_arlen;
+    wire [2:0] dcache_arsize;
+    assign dcache_arlen  = (dcache_rd_type == 3'b100) ? 8'd3   : // Cache line: 4 beats
+                           8'd0;                                 // Single word
+    assign dcache_arsize = (dcache_rd_type == 3'b100) ? 3'b010 : // 4 bytes per beat
+                           (dcache_rd_type == 3'b010) ? 3'b010 : // word
+                           (dcache_rd_type == 3'b001) ? 3'b001 : // halfword
+                           3'b000;                               // byte
+    // Request type decode for DCache
+    wire [7:0] dcache_awlen;
+    wire [2:0] dcache_awsize;
+    assign dcache_awlen  = (dcache_wr_type == 3'b100) ? 8'd3   : // Cache line: 4 beats
+                           8'd0;                                 // Single word
+    assign dcache_awsize = (dcache_wr_type == 3'b100) ? 3'b010 : // 4 bytes per beat
+                           (dcache_wr_type == 3'b010) ? 3'b010 : // word
+                           (dcache_wr_type == 3'b001) ? 3'b001 : // halfword
+                           3'b000;                               // byte
+
+    wire [31:0] dcache_wr_data_slice [3:0];
+    assign dcache_wr_data_slice[0] = dcache_wr_data[ 31:  0];
+    assign dcache_wr_data_slice[1] = dcache_wr_data[ 63: 32];
+    assign dcache_wr_data_slice[2] = dcache_wr_data[ 95: 64];
+    assign dcache_wr_data_slice[3] = dcache_wr_data[127: 96];
 
     // Arbitration: priority ICache > Data
     wire icache_rd_req_valid = icache_rd_req;
-    wire data_rd_req_valid   = data_sram_req && !data_sram_wr;
-    wire data_wr_req_valid   = data_sram_req && data_sram_wr;
+    wire data_rd_req_valid   = dcache_rd_req;
+    wire data_wr_req_valid   = dcache_wr_req;
 
     // Handshake signals
     wire ar_hs, aw_hs, w_hs, b_hs, r_hs;
@@ -117,8 +147,8 @@ module bridge
     assign w_hs         = (state == S_AW) && wvalid && wready;
     assign b_hs         = (state == S_B) && bvalid && bready;
     assign r_hs         = (state == S_R) && rvalid && rready;
-    assign aw_done_next = aw_done | aw_hs;
-    assign w_done_next  = w_done | w_hs;
+    assign aw_done_next = aw_done || aw_hs;
+    assign w_done_next  = w_done  || (w_hs && (wlast || burst_finish));
 
     // State machine
     always @(posedge aclk) begin
@@ -143,11 +173,11 @@ module bridge
                     end else if (data_rd_req_valid) begin
                         grant <= 2'd1;
                         state <= S_AR;
-                        burst_len <= 3'd0;
+                        burst_len <= (dcache_rd_type == 3'b100) ? 3'd3 : 3'd0;
                     end else if (data_wr_req_valid) begin
                         grant <= 2'd2;
                         state <= S_AW;
-                        burst_len <= 3'd0;
+                        burst_len <= (dcache_wr_type == 3'b100) ? 3'd3 : 3'd0;
                     end
                 end
 
@@ -170,7 +200,14 @@ module bridge
 
                 S_AW: begin
                     if (aw_hs) wready_buf[0] <= 1'b1;
-                    if (w_hs)  wready_buf[1] <= 1'b1;
+                    if (w_hs) begin
+                        if (wlast || burst_finish) begin
+                            wready_buf[1] <= 1'b1;
+                            burst_cnt <= 3'd0;
+                        end else begin
+                            burst_cnt <= burst_cnt + 3'd1;
+                        end
+                    end
                     if (aw_done_next && w_done_next) begin
                         state <= S_B;
                     end
@@ -190,23 +227,23 @@ module bridge
 
     // ICache interface outputs
     assign icache_rd_rdy    = (state == S_AR) && (grant == 2'd0) && arready;
-    assign icache_ret_valid = (state == S_R) && (grant == 2'd0) && rvalid;
-    assign icache_ret_last  = (state == S_R) && (grant == 2'd0) && rvalid && burst_finish;
+    assign icache_ret_valid = (state == S_R)  && (grant == 2'd0) && rvalid;
+    assign icache_ret_last  = (state == S_R)  && (grant == 2'd0) && rvalid && burst_finish;
     assign icache_ret_data  = rdata;
     assign icache_wr_rdy    = 1'b1; // ICache never writes
 
-    // Data SRAM interface outputs
-    assign data_sram_addr_ok = ((state == S_AR) && (grant == 2'd1) && arready) ||
-                               ((state == S_AW) && (grant == 2'd2) && aw_done_next && w_done_next);
-    assign data_sram_data_ok = ((state == S_R) && (grant == 2'd1) && rvalid) ||
-                               ((state == S_B) && (grant == 2'd2) && bvalid);
-    assign data_sram_rdata   = rdata;
+    // DCache interface outputs
+    assign dcache_rd_rdy    = (state == S_AR) && (grant == 2'd1) && arready;
+    assign dcache_ret_valid = (state == S_R)  && (grant == 2'd1) && rvalid;
+    assign dcache_ret_last  = (state == S_R)  && (grant == 2'd1) && rvalid && burst_finish;
+    assign dcache_ret_data  = rdata;
+    assign dcache_wr_rdy    = (state == S_AW) && (grant == 2'd2) && (awready || wready);
 
     // AR channel
     assign arid    = {2'b00, grant};
-    assign araddr  = (grant == 2'd0) ? icache_rd_addr : data_sram_addr;
-    assign arlen   = (grant == 2'd0) ? icache_arlen : 8'd0;
-    assign arsize  = (grant == 2'd0) ? icache_arsize : {1'b0, data_sram_size};
+    assign araddr  = (grant == 2'd0) ? icache_rd_addr : (grant == 2'd1) ? dcache_rd_addr : dcache_wr_addr;
+    assign arlen   = (grant == 2'd0) ? icache_arlen : dcache_arlen;
+    assign arsize  = (grant == 2'd0) ? icache_arsize : dcache_arsize;
     assign arburst = 2'b01; // INCR
     assign arlock  = 2'b00;
     assign arcache = 4'b0000;
@@ -218,9 +255,9 @@ module bridge
 
     // AW channel
     assign awid    = {2'b00, grant};
-    assign awaddr  = data_sram_addr;
+    assign awaddr  = dcache_wr_addr;
     assign awlen   = 8'd0;
-    assign awsize  = {1'b0, data_sram_size};
+    assign awsize  = dcache_arsize;
     assign awburst = 2'b01;
     assign awlock  = 2'b00;
     assign awcache = 4'b0000;
@@ -229,9 +266,9 @@ module bridge
 
     // W channel
     assign wid     = {2'b00, grant};
-    assign wdata   = data_sram_wdata;
-    assign wstrb   = data_sram_wstrb;
-    assign wlast   = 1'b1;
+    assign wdata   = dcache_wr_data_slice[burst_cnt];
+    assign wstrb   = dcache_wr_wstrb;
+    assign wlast   = (state == S_AW) && burst_finish;
     assign wvalid  = (state == S_AW) && !w_done;
 
     // B channel

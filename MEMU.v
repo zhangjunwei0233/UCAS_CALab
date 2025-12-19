@@ -17,8 +17,8 @@ module MEMU(
     output wire [`MEM2WB_LEN - 1:0] mem_to_wb_zip,
 
     // Data SRAM-like interface
-    input  wire        data_sram_data_ok,
-    input  wire [31:0] data_sram_rdata,
+    input  wire        data_data_ok,
+    input  wire [31:0] data_rdata,
 
     // Data forwarding to ID stage
     output wire [39:0] mem_rf_zip,
@@ -55,14 +55,14 @@ module MEMU(
 
     wire [31:0] mem_rf_wdata;
 
-    // SRAM-like interface control
+    // Cache interface control
     wire        mem_wait_data_ok;
     reg         mem_wait_data_ok_r;
 
     assign mem_wait_data_ok = mem_wait_data_ok_r & mem_valid & ~wb_ex;
 
     // Pipeline state control
-    assign mem_ready_go = ~mem_wait_data_ok | mem_wait_data_ok & data_sram_data_ok;
+    assign mem_ready_go = ~mem_wait_data_ok | mem_wait_data_ok & data_data_ok;
     assign mem_allowin = ~mem_valid | (mem_ready_go & wb_allowin);
     assign mem_to_wb_valid = mem_valid & mem_ready_go;
 
@@ -107,30 +107,30 @@ module MEMU(
     wire [31:0] mem_data =
                 // ld.b
                 (mem_mem_op == 0) ?
-                ( addr0 ? {{24{data_sram_rdata[ 7]}}, data_sram_rdata[ 7: 0]} :
-                  addr1 ? {{24{data_sram_rdata[15]}}, data_sram_rdata[15: 8]} :
-                  addr2 ? {{24{data_sram_rdata[23]}}, data_sram_rdata[23:16]} :
-                  addr3 ? {{24{data_sram_rdata[31]}}, data_sram_rdata[31:24]} :
+                ( addr0 ? {{24{data_rdata[ 7]}}, data_rdata[ 7: 0]} :
+                  addr1 ? {{24{data_rdata[15]}}, data_rdata[15: 8]} :
+                  addr2 ? {{24{data_rdata[23]}}, data_rdata[23:16]} :
+                  addr3 ? {{24{data_rdata[31]}}, data_rdata[31:24]} :
                   32'd0 ) :
                 // ld.h
                 (mem_mem_op == 1) ?
-                ( (addr0 | addr1) ? {{16{data_sram_rdata[15]}}, data_sram_rdata[15: 0]} :
-                  (addr2 | addr3) ? {{16{data_sram_rdata[31]}}, data_sram_rdata[31:16]} :
+                ( (addr0 | addr1) ? {{16{data_rdata[15]}}, data_rdata[15: 0]} :
+                  (addr2 | addr3) ? {{16{data_rdata[31]}}, data_rdata[31:16]} :
                   32'd0 ) :
                 // ld.w
                 (mem_mem_op == 2) ?
-                ( data_sram_rdata ) :
+                ( data_rdata ) :
                 // ld.bu
                 (mem_mem_op == 8) ?
-                ( addr0 ? {24'd0, data_sram_rdata[ 7: 0]} :
-                  addr1 ? {24'd0, data_sram_rdata[15: 8]} :
-                  addr2 ? {24'd0, data_sram_rdata[23:16]} :
-                  addr3 ? {24'd0, data_sram_rdata[31:24]} :
+                ( addr0 ? {24'd0, data_rdata[ 7: 0]} :
+                  addr1 ? {24'd0, data_rdata[15: 8]} :
+                  addr2 ? {24'd0, data_rdata[23:16]} :
+                  addr3 ? {24'd0, data_rdata[31:24]} :
                   32'd0 ) :
                 // ld.hu
                 (mem_mem_op == 9) ?
-                ( (addr0 | addr1) ? {16'd0, data_sram_rdata[15: 0]} :
-                  (addr2 | addr3) ? {16'd0, data_sram_rdata[31:16]} :
+                ( (addr0 | addr1) ? {16'd0, data_rdata[15: 0]} :
+                  (addr2 | addr3) ? {16'd0, data_rdata[31:16]} :
                   32'd0 ) :
                 // default
                 32'd0;

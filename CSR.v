@@ -58,6 +58,8 @@ module CSR
    output wire        csr_crmd_da_value,
    output wire        csr_crmd_pg_value,
    output wire [1:0]  csr_crmd_plv_value,
+   output wire [1:0]  csr_crmd_datf_value,
+   output wire [1:0]  csr_crmd_datm_value,
    output wire [31:0] csr_dmw0_value,
    output wire [31:0] csr_dmw1_value
    );
@@ -495,6 +497,8 @@ module CSR
     assign csr_crmd_da_value  = csr_crmd_da;
     assign csr_crmd_pg_value  = csr_crmd_pg;
     assign csr_crmd_plv_value = csr_crmd_plv;
+    assign csr_crmd_datf_value = csr_crmd_datf;
+    assign csr_crmd_datm_value = csr_crmd_datm;
     assign csr_dmw0_value     = csr_dmw0;
     assign csr_dmw1_value     = csr_dmw1;
 

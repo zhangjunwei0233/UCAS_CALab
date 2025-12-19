@@ -16,14 +16,18 @@ module EXEU(
     output wire                      exe_to_mem_valid,
     output wire [`EXE2MEM_LEN - 1:0] exe_to_mem_zip,
 
-    // Data SRAM-like interface
-    output wire                      data_sram_req,
-    output wire                      data_sram_wr,
-    output wire [ 1:0]               data_sram_size,
-    output wire [31:0]               data_sram_addr,
-    output wire [ 3:0]               data_sram_wstrb,
-    output wire [31:0]               data_sram_wdata,
-    input wire                       data_sram_addr_ok,
+    // Data Cache interface
+    output wire                      data_valid,
+    output wire                      data_op,
+    output wire [ 7:0]               data_index,
+    output wire [19:0]               data_tag,
+    output wire [ 3:0]               data_offset,
+    output wire [ 3:0]               data_wstrb,
+    output wire [31:0]               data_wdata,
+    output wire                      data_uncache,
+    input wire                       data_addr_ok,
+    input wire                       data_data_ok,
+    input wire [31:0]                data_rdata,
 
     // Data forwarding to ID stage
     output wire [39:0]               exe_rf_zip, // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
@@ -38,6 +42,7 @@ module EXEU(
     input wire                       csr_crmd_da_value,
     input wire                       csr_crmd_pg_value,
     input wire [1:0]                 csr_crmd_plv_value,
+    input wire [1:0]                 csr_crmd_datm_value,
     input wire [31:0]                csr_dmw0_value,
     input wire [31:0]                csr_dmw1_value,
 
@@ -141,7 +146,7 @@ module EXEU(
     assign start_multicycle = is_multicycle_op & start_exe & exe_multicycle_ok;  // Special time stamp
     
     // EXE ready_go: no pending multicycle ops and memory request done
-    assign exe_ready_go = ~start_multicycle & ~multicycle_executing & (~exe_mem_req | exe_mem_req & data_sram_addr_ok);
+    assign exe_ready_go = ~start_multicycle & ~multicycle_executing & (~exe_mem_req | exe_mem_req & data_addr_ok);
     assign exe_allowin = ~exe_valid | (exe_ready_go & mem_allowin);
     assign exe_to_mem_valid = exe_valid & exe_ready_go;
 
@@ -172,8 +177,14 @@ module EXEU(
     end
 
     // Address Translation
-    wire is_dmw0 = exe_alu_result[31:29] == csr_dmw0_value[31:29];
-    wire is_dmw1 = exe_alu_result[31:29] == csr_dmw1_value[31:29];
+    wire is_dmw0 =
+         (exe_alu_result[31:29] == csr_dmw0_value[31:29]) &&
+         ((csr_crmd_plv_value == 2'd0) && (csr_dmw0_value[0]) ||
+          (csr_crmd_plv_value == 2'd3) && (csr_dmw0_value[3]));
+    wire is_dmw1 =
+         (exe_alu_result[31:29] == csr_dmw1_value[31:29]) &&
+         ((csr_crmd_plv_value == 2'd0) && (csr_dmw1_value[0]) ||
+          (csr_crmd_plv_value == 2'd3) && (csr_dmw1_value[3]));
     wire [31:0] paddr =
                 csr_crmd_pg_value ?
                 ( is_dmw0 ? {csr_dmw0_value[27:25], exe_alu_result[28:0]} :
@@ -306,7 +317,7 @@ module EXEU(
     assign tlb_invtlb_op  = exe_invtlb_op;
     assign tlb_invtlb_valid = exe_to_mem_valid & (exe_tlb_op == `TLB_OP_INV);
 
-    // Data SRAM-like interface
+    // DCache interface
     wire addr0 = (paddr[1:0] == 2'd0);
     wire addr1 = (paddr[1:0] == 2'd1);
     wire addr2 = (paddr[1:0] == 2'd2);
@@ -318,46 +329,52 @@ module EXEU(
     // Only send request when MEM stage allows in (simplified design)
     wire   exe_mem_req;
     assign exe_mem_req = (exe_res_from_mem | is_store) & exe_multicycle_ok;
-    assign data_sram_req = exe_mem_req & exe_valid & mem_allowin;
-    assign data_sram_wr = is_store & exe_multicycle_ok;
-    assign data_sram_size = is_byte_op ? 2'd0 :   // 1 byte
-                            is_half_op ? 2'd1 :   // 2 bytes
-                            is_word_op ? 2'd2 :   // 4 bytes
-                            2'd0;
+
+    wire [1:0] data_mat = 
+               !csr_crmd_pg_value ? csr_crmd_datm_value : // DA mode: cacheable by default
+               ( is_dmw0 ? csr_dmw0_value[5:4] :     // DMW0 MAT
+                 is_dmw1 ? csr_dmw1_value[5:4] :     // DMW1 MAT
+                 s1_mat                              // TLB MAT
+                 );
     
-    assign data_sram_wstrb =   // st.b
-                               (exe_mem_op == 4'd4) ?
-                               ( addr0 ? 4'b0001 :
-                                 addr1 ? 4'b0010 :
-                                 addr2 ? 4'b0100 :
-                                 addr3 ? 4'b1000 :
-                                 4'b0000) :
-                               // st.h
-                               (exe_mem_op == 4'd5) ?
-                               ( (addr0 | addr1) ? 4'b0011 :
-                                 (addr2 | addr3) ? 4'b1100 :
-                                 4'b0000 ) :
-                               // st.w
-                               (exe_mem_op == 4'd6) ?
-                               ( 4'b1111 ) : 4'b0000;
-    assign data_sram_addr   = paddr;
-    assign data_sram_wdata  = // st.b
-                              (exe_mem_op == 4'd4) ?
-                              ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
-                                addr1 ? {16'd0, exe_rkd_value[7:0],  8'd0} :
-                                addr2 ? { 8'd0, exe_rkd_value[7:0], 16'd0} :
-                                addr3 ? {       exe_rkd_value[7:0], 24'd0} :
-                                32'd0 ) :
-                              // st.h
-                              (exe_mem_op == 4'd5) ?
-                              ( (addr0 | addr1) ? {16'd0, exe_rkd_value[15:0]} :
-                                (addr2 | addr3) ? {exe_rkd_value[15:0], 16'd0} :
-                                32'd0 ) :
-                              // st.w
-                              (exe_mem_op == 4'd6) ?
-                              ( exe_rkd_value ) :
-                              // default
-                              32'd0;
+    assign data_valid = exe_mem_req & exe_valid & mem_allowin;
+    assign data_op    = is_store;
+    assign data_wstrb =   // st.b
+                          (exe_mem_op == 4'd4) ?
+                          ( addr0 ? 4'b0001 :
+                            addr1 ? 4'b0010 :
+                            addr2 ? 4'b0100 :
+                            addr3 ? 4'b1000 :
+                            4'b0000) :
+                          // st.h
+                          (exe_mem_op == 4'd5) ?
+                          ( (addr0 | addr1) ? 4'b0011 :
+                            (addr2 | addr3) ? 4'b1100 :
+                            4'b0000 ) :
+                          // st.w
+                          (exe_mem_op == 4'd6) ?
+                          ( 4'b1111 ) : 4'b0000;
+    assign data_index  = paddr[11: 4];
+    assign data_tag    = paddr[31:12];
+    assign data_offset = paddr[ 3:0];
+    assign data_wdata  = // st.b
+                         (exe_mem_op == 4'd4) ?
+                         ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
+                           addr1 ? {16'd0, exe_rkd_value[7:0],  8'd0} :
+                           addr2 ? { 8'd0, exe_rkd_value[7:0], 16'd0} :
+                           addr3 ? {       exe_rkd_value[7:0], 24'd0} :
+                           32'd0 ) :
+                         // st.h
+                         (exe_mem_op == 4'd5) ?
+                         ( (addr0 | addr1) ? {16'd0, exe_rkd_value[15:0]} :
+                           (addr2 | addr3) ? {exe_rkd_value[15:0], 16'd0} :
+                           32'd0 ) :
+                         // st.w
+                         (exe_mem_op == 4'd6) ?
+                         ( exe_rkd_value ) :
+                         // default
+                         32'd0;
+    assign data_uncache = (data_mat == 2'b00);  // SUC (MAT=0): uncached
 
     // CSR value adjustment for TLB search
     // TLBSRCH only updates NE (bit 31) and Index (bit 3:0), PS field is preserved

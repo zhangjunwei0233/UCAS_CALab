@@ -158,17 +158,6 @@ module mycpu_top
     wire                clk;                    // From my_bridge of bridge.v
     wire                resetn;                 // From my_bridge of bridge.v
     
-    // Data SRAM interface wires
-    wire [31:0]         data_sram_addr;         // From my_exeu of EXEU.v
-    wire                data_sram_addr_ok;      // From my_bridge of bridge.v
-    wire                data_sram_data_ok;      // From my_bridge of bridge.v
-    wire [31:0]         data_sram_rdata;        // From my_bridge of bridge.v
-    wire                data_sram_req;          // From my_exeu of EXEU.v
-    wire [1:0]          data_sram_size;         // From my_exeu of EXEU.v
-    wire [31:0]         data_sram_wdata;        // From my_exeu of EXEU.v
-    wire                data_sram_wr;           // From my_exeu of EXEU.v
-    wire [3:0]          data_sram_wstrb;        // From my_exeu of EXEU.v
-    
     // ICache interface wires (IFU <-> ICache)
     wire                inst_valid;             // From my_ifu of IFU.v
     wire                inst_op;                // From my_ifu of IFU.v
@@ -191,6 +180,35 @@ module mycpu_top
     wire                icache_ret_last;        // From my_bridge of bridge.v
     wire [31:0]         icache_ret_data;        // From my_bridge of bridge.v
     wire                icache_wr_rdy;          // From my_bridge of bridge.v
+    
+    // DCache interface wires (EXEU <-> DCache)
+    wire                data_valid;             // From my_exeu of EXEU.v
+    wire                data_op;                // From my_exeu of EXEU.v
+    wire [7:0]          data_index;             // From my_exeu of EXEU.v
+    wire [19:0]         data_tag;               // From my_exeu of EXEU.v
+    wire [3:0]          data_offset;            // From my_exeu of EXEU.v
+    wire [3:0]          data_wstrb;             // From my_exeu of EXEU.v
+    wire [31:0]         data_wdata;             // From my_exeu of EXEU.v
+    wire                data_uncache;           // From my_exeu of EXEU.v
+    wire                data_addr_ok;           // From dcache of cache.v
+    wire                data_data_ok;           // From dcache of cache.v
+    wire [31:0]         data_rdata;             // From dcache of cache.v
+
+    // DCache-Bridge interface wires
+    wire                dcache_rd_req;          // From dcache of cache.v
+    wire [2:0]          dcache_rd_type;         // From dcache of cache.v
+    wire [31:0]         dcache_rd_addr;         // From dcache of cache.v
+    wire                dcache_rd_rdy;          // From my_bridge of bridge.v
+    wire                dcache_ret_valid;       // From my_bridge of bridge.v
+    wire                dcache_ret_last;        // From my_bridge of bridge.v
+    wire [31:0]         dcache_ret_data;        // From my_bridge of bridge.v
+    wire                dcache_wr_req;          // From dcache of cache.v
+    wire [2:0]          dcache_wr_type;         // From dcache of cache.v
+    wire [31:0]         dcache_wr_addr;         // From dcache of cache.v
+    wire [3:0]          dcache_wr_wstrb;        // From dcache of cache.v
+    wire [127:0]        dcache_wr_data;         // From dcache of cache.v
+    wire                dcache_wr_rdy;          // From my_bridge of bridge.v
+
 
     wire [9:0]          s0_asid;                // From my_ifu of IFU.v
     wire                s0_d;                   // From u_tlb of tlb.v
@@ -217,6 +235,8 @@ module mycpu_top
     wire                csr_crmd_da_value;      // From u_csr of CSR.v
     wire                csr_crmd_pg_value;      // From u_csr of CSR.v
     wire [1:0]          csr_crmd_plv_value;     // From u_csr of CSR.v
+    wire [1:0]          csr_crmd_datf_value;    // From u_csr of CSR.v
+    wire [1:0]          csr_crmd_datm_value;    // From u_csr of CSR.v
     wire [31:0]         csr_dmw0_value;         // From u_csr of CSR.v
     wire [31:0]         csr_dmw1_value;         // From u_csr of CSR.v
     
@@ -251,66 +271,101 @@ module mycpu_top
         .ret_data          (icache_ret_data[31:0]),
         .wr_rdy            (icache_wr_rdy));
 
-    bridge my_bridge(
+    // DCache instance
+    cache dcache(
         // Outputs
+        .addr_ok           (data_addr_ok),
+        .data_ok           (data_data_ok),
+        .rdata             (data_rdata[31:0]),
+        .rd_req            (dcache_rd_req),
+        .rd_type           (dcache_rd_type[2:0]),
+        .rd_addr           (dcache_rd_addr[31:0]),
+        .wr_req            (dcache_wr_req),
+        .wr_type           (dcache_wr_type),
+        .wr_addr           (dcache_wr_addr),
+        .wr_wstrb          (dcache_wr_wstrb),
+        .wr_data           (dcache_wr_data),
+        // Inputs
         .clk               (clk),
         .resetn            (resetn),
-        .icache_rd_rdy     (icache_rd_rdy),
-        .icache_ret_valid  (icache_ret_valid),
-        .icache_ret_last   (icache_ret_last),
-        .icache_ret_data   (icache_ret_data[31:0]),
-        .icache_wr_rdy     (icache_wr_rdy),
-        .data_sram_addr_ok (data_sram_addr_ok),
-        .data_sram_data_ok (data_sram_data_ok),
-        .data_sram_rdata   (data_sram_rdata[31:0]),
-        .arid              (arid[3:0]),
-        .araddr            (araddr[31:0]),
-        .arlen             (arlen[7:0]),
-        .arsize            (arsize[2:0]),
-        .arburst           (arburst[1:0]),
-        .arlock            (arlock[1:0]),
-        .arcache           (arcache[3:0]),
-        .arprot            (arprot[2:0]),
-        .arvalid           (arvalid),
-        .rready            (rready),
-        .awid              (awid[3:0]),
-        .awaddr            (awaddr[31:0]),
-        .awlen             (awlen[7:0]),
-        .awsize            (awsize[2:0]),
-        .awburst           (awburst[1:0]),
-        .awlock            (awlock[1:0]),
-        .awcache           (awcache[3:0]),
-        .awprot            (awprot[2:0]),
-        .awvalid           (awvalid),
-        .wid               (wid[3:0]),
-        .wdata             (wdata[31:0]),
-        .wstrb             (wstrb[3:0]),
-        .wlast             (wlast),
-        .wvalid            (wvalid),
-        .bready            (bready),
-        // Inputs
-        .icache_rd_req     (icache_rd_req),
-        .icache_rd_type    (icache_rd_type[2:0]),
-        .icache_rd_addr    (icache_rd_addr[31:0]),
-        .data_sram_req     (data_sram_req),
-        .data_sram_wr      (data_sram_wr),
-        .data_sram_size    (data_sram_size[1:0]),
-        .data_sram_addr    (data_sram_addr[31:0]),
-        .data_sram_wstrb   (data_sram_wstrb[3:0]),
-        .data_sram_wdata   (data_sram_wdata[31:0]),
-        .aclk              (aclk),
-        .aresetn           (aresetn),
-        .arready           (arready),
-        .rid               (rid[3:0]),
-        .rdata             (rdata[31:0]),
-        .rresp             (rresp[1:0]),
-        .rlast             (rlast),
-        .rvalid            (rvalid),
-        .awready           (awready),
-        .wready            (wready),
-        .bid               (bid[3:0]),
-        .bresp             (bresp[1:0]),
-        .bvalid            (bvalid));
+        .valid             (data_valid),
+        .op                (data_op),
+        .index             (data_index[7:0]),
+        .tag               (data_tag[19:0]),
+        .offset            (data_offset[3:0]),
+        .wstrb             (data_wstrb[3:0]),
+        .wdata             (data_wdata[31:0]),
+        .uncache           (data_uncache),
+        .rd_rdy            (dcache_rd_rdy),
+        .ret_valid         (dcache_ret_valid),
+        .ret_last          (dcache_ret_last),
+        .ret_data          (dcache_ret_data[31:0]),
+        .wr_rdy            (dcache_wr_rdy));
+
+    bridge my_bridge(/*AUTOINST*/
+                     // Outputs
+                     .clk               (clk),
+                     .resetn            (resetn),
+                     .icache_rd_rdy     (icache_rd_rdy),
+                     .icache_ret_valid  (icache_ret_valid),
+                     .icache_ret_last   (icache_ret_last),
+                     .icache_ret_data   (icache_ret_data[31:0]),
+                     .icache_wr_rdy     (icache_wr_rdy),
+                     .dcache_rd_rdy     (dcache_rd_rdy),
+                     .dcache_ret_valid  (dcache_ret_valid),
+                     .dcache_ret_last   (dcache_ret_last),
+                     .dcache_ret_data   (dcache_ret_data[31:0]),
+                     .dcache_wr_rdy     (dcache_wr_rdy),
+                     .arid              (arid[3:0]),
+                     .araddr            (araddr[31:0]),
+                     .arlen             (arlen[7:0]),
+                     .arsize            (arsize[2:0]),
+                     .arburst           (arburst[1:0]),
+                     .arlock            (arlock[1:0]),
+                     .arcache           (arcache[3:0]),
+                     .arprot            (arprot[2:0]),
+                     .arvalid           (arvalid),
+                     .rready            (rready),
+                     .awid              (awid[3:0]),
+                     .awaddr            (awaddr[31:0]),
+                     .awlen             (awlen[7:0]),
+                     .awsize            (awsize[2:0]),
+                     .awburst           (awburst[1:0]),
+                     .awlock            (awlock[1:0]),
+                     .awcache           (awcache[3:0]),
+                     .awprot            (awprot[2:0]),
+                     .awvalid           (awvalid),
+                     .wid               (wid[3:0]),
+                     .wdata             (wdata[31:0]),
+                     .wstrb             (wstrb[3:0]),
+                     .wlast             (wlast),
+                     .wvalid            (wvalid),
+                     .bready            (bready),
+                     // Inputs
+                     .icache_rd_req     (icache_rd_req),
+                     .icache_rd_type    (icache_rd_type[2:0]),
+                     .icache_rd_addr    (icache_rd_addr[31:0]),
+                     .dcache_rd_req     (dcache_rd_req),
+                     .dcache_rd_type    (dcache_rd_type[2:0]),
+                     .dcache_rd_addr    (dcache_rd_addr[31:0]),
+                     .dcache_wr_req     (dcache_wr_req),
+                     .dcache_wr_type    (dcache_wr_type[2:0]),
+                     .dcache_wr_addr    (dcache_wr_addr[31:0]),
+                     .dcache_wr_wstrb   (dcache_wr_wstrb[3:0]),
+                     .dcache_wr_data    (dcache_wr_data[127:0]),
+                     .aclk              (aclk),
+                     .aresetn           (aresetn),
+                     .arready           (arready),
+                     .rid               (rid[3:0]),
+                     .rdata             (rdata[31:0]),
+                     .rresp             (rresp[1:0]),
+                     .rlast             (rlast),
+                     .rvalid            (rvalid),
+                     .awready           (awready),
+                     .wready            (wready),
+                     .bid               (bid[3:0]),
+                     .bresp             (bresp[1:0]),
+                     .bvalid            (bvalid));
 
     IFU my_ifu(/*AUTOINST*/
                // Outputs
@@ -347,6 +402,7 @@ module mycpu_top
                .csr_crmd_da_value       (csr_crmd_da_value),
                .csr_crmd_pg_value       (csr_crmd_pg_value),
                .csr_crmd_plv_value      (csr_crmd_plv_value[1:0]),
+               .csr_crmd_datf_value     (csr_crmd_datf_value[1:0]),
                .csr_dmw0_value          (csr_dmw0_value[31:0]),
                .csr_dmw1_value          (csr_dmw1_value[31:0]),
                .id_allowin              (id_allowin),
@@ -379,12 +435,14 @@ module mycpu_top
                  .exe_allowin           (exe_allowin),
                  .exe_to_mem_valid      (exe_to_mem_valid),
                  .exe_to_mem_zip        (exe_to_mem_zip[`EXE2MEM_LEN-1:0]),
-                 .data_sram_req         (data_sram_req),
-                 .data_sram_wr          (data_sram_wr),
-                 .data_sram_size        (data_sram_size[1:0]),
-                 .data_sram_addr        (data_sram_addr[31:0]),
-                 .data_sram_wstrb       (data_sram_wstrb[3:0]),
-                 .data_sram_wdata       (data_sram_wdata[31:0]),
+                 .data_valid            (data_valid),
+                 .data_op               (data_op),
+                 .data_index            (data_index[7:0]),
+                 .data_tag              (data_tag[19:0]),
+                 .data_offset           (data_offset[3:0]),
+                 .data_wstrb            (data_wstrb[3:0]),
+                 .data_wdata            (data_wdata[31:0]),
+                 .data_uncache          (data_uncache),
                  .exe_rf_zip            (exe_rf_zip[39:0]),
                  .s1_vppn               (s1_vppn[18:0]),
                  .s1_va_bit12           (s1_va_bit12),
@@ -398,7 +456,9 @@ module mycpu_top
                  .id_to_exe_valid       (id_to_exe_valid),
                  .id_to_exe_zip         (id_to_exe_zip[`ID2EXE_LEN-1:0]),
                  .mem_allowin           (mem_allowin),
-                 .data_sram_addr_ok     (data_sram_addr_ok),
+                 .data_addr_ok          (data_addr_ok),
+                 .data_data_ok          (data_data_ok),
+                 .data_rdata            (data_rdata[31:0]),
                  .mem_ex                (mem_ex),
                  .wb_ex                 (wb_ex),
                  .csr_tlbehi_vppn       (csr_tlbehi_vppn[18:0]),
@@ -406,6 +466,7 @@ module mycpu_top
                  .csr_crmd_da_value     (csr_crmd_da_value),
                  .csr_crmd_pg_value     (csr_crmd_pg_value),
                  .csr_crmd_plv_value    (csr_crmd_plv_value[1:0]),
+                 .csr_crmd_datm_value   (csr_crmd_datm_value[1:0]),
                  .csr_dmw0_value        (csr_dmw0_value[31:0]),
                  .csr_dmw1_value        (csr_dmw1_value[31:0]),
                  .s1_found              (s1_found),
@@ -431,8 +492,8 @@ module mycpu_top
                  .exe_to_mem_valid      (exe_to_mem_valid),
                  .exe_to_mem_zip        (exe_to_mem_zip[`EXE2MEM_LEN-1:0]),
                  .wb_allowin            (wb_allowin),
-                 .data_sram_data_ok     (data_sram_data_ok),
-                 .data_sram_rdata       (data_sram_rdata[31:0]),
+                 .data_data_ok          (data_data_ok),
+                 .data_rdata            (data_rdata[31:0]),
                  .wb_ex                 (wb_ex)); 
 
     WBU my_wbu(/*AUTOINST*/
@@ -530,6 +591,8 @@ module mycpu_top
               .csr_crmd_da_value        (csr_crmd_da_value),
               .csr_crmd_pg_value        (csr_crmd_pg_value),
               .csr_crmd_plv_value       (csr_crmd_plv_value[1:0]),
+              .csr_crmd_datf_value      (csr_crmd_datf_value[1:0]),
+              .csr_crmd_datm_value      (csr_crmd_datm_value[1:0]),
               .csr_dmw0_value           (csr_dmw0_value[31:0]),
               .csr_dmw1_value           (csr_dmw1_value[31:0]),
               // Inputs
