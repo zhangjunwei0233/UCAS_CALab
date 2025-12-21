@@ -237,7 +237,7 @@ module bridge
     assign dcache_ret_valid = (state == S_R)  && (grant == 2'd1) && rvalid;
     assign dcache_ret_last  = (state == S_R)  && (grant == 2'd1) && rvalid && burst_finish;
     assign dcache_ret_data  = rdata;
-    assign dcache_wr_rdy    = (state == S_AW) && (grant == 2'd2) && (awready || wready);
+    assign dcache_wr_rdy    = (state == S_AW) && (grant == 2'd2) && (aw_done_next && w_done_next);
 
     // AR channel
     assign arid    = {2'b00, grant};
