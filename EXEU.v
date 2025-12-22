@@ -26,6 +26,7 @@ module EXEU(
     output wire [31:0]               data_wdata,
     output wire                      data_uncache,
     output wire                      data_vaddr_bit0,  // vaddr[0] for CACOP way selection
+    output wire [ 7:0]               data_vaddr_index, // vaddr[11:4] for CACOP index selection
     input wire                       data_addr_ok,
     input wire                       data_data_ok,
     input wire [31:0]                data_rdata,
@@ -166,8 +167,15 @@ module EXEU(
     assign start_multicycle = is_multicycle_op & start_exe & exe_multicycle_ok;  // Special time stamp
     
     // EXE ready_go: no pending multicycle ops and memory request done and CACOP complete
+    wire exe_cacop_icache = exe_cacop_valid & exe_cacop_is_icache;
+    wire exe_cacop_dcache = exe_cacop_valid & exe_cacop_is_dcache;
+    wire exe_cacop_has_target = exe_cacop_icache | exe_cacop_dcache;
+    wire exe_cacop_done = (~exe_cacop_valid) |
+                          (~exe_cacop_has_target) |
+                          (exe_cacop_icache & icache_cacop_done) |
+                          (exe_cacop_dcache & dcache_cacop_done);
     assign exe_ready_go = ~start_multicycle & ~multicycle_executing & (~exe_mem_req | exe_mem_req & data_addr_ok) &
-                          (~exe_cacop_valid | icache_cacop_rdy | dcache_cacop_rdy);
+                          exe_cacop_done;
     assign exe_allowin = ~exe_valid | (exe_ready_go & mem_allowin);
     assign exe_to_mem_valid = exe_valid & exe_ready_go;
 
@@ -219,13 +227,14 @@ module EXEU(
     // Exception generation
     // Address alignment check for memory operations
     wire is_mem_op = (exe_mem_op != 4'd0);
+    wire is_cacop_query = exe_cacop_valid & (exe_cacop_code[4:3] == 2'b10);
     wire is_half_op = (exe_mem_op == 4'd1) | (exe_mem_op == 4'd5) | (exe_mem_op == 4'd9); // ld.h, st.h, ld.hu
     wire is_word_op = (exe_mem_op == 4'd2) | (exe_mem_op == 4'd6); // ld.w, st.w
     
     wire addr_align_error    = is_mem_op & ((is_half_op & paddr[0]) |        // Half-word must be 2-byte aligned
                                             (is_word_op & (|paddr[1:0]))     // Word must be 4-byte aligned
                                             );
-    wire tlb_gen_error       = is_mem_op & csr_crmd_pg_value & !is_dmw0 & !is_dmw1;
+    wire tlb_gen_error       = (is_mem_op | is_cacop_query) & csr_crmd_pg_value & !is_dmw0 & !is_dmw1;
     wire tlb_refill_error    = tlb_gen_error & !s1_found;
     wire load_invalid_error  = tlb_gen_error & !is_store & s1_found & !s1_v;
     wire store_invalid_error = tlb_gen_error &  is_store & s1_found & !s1_v;
@@ -324,17 +333,18 @@ module EXEU(
                           exe_alu_result;                              // Regular ALU result
 
     // TLB search / INVTLB interface (port 1)
+    wire tlb_va_valid = is_mem_op | is_cacop_query;
     assign s1_vppn     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_tlbehi_vppn :
                          (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[31:13] :
-                         is_mem_op                    ? exe_alu_result[31:13] :
+                         tlb_va_valid                 ? exe_alu_result[31:13] :
                          19'd0;
     assign s1_va_bit12 = (exe_tlb_op == `TLB_OP_SRCH) ? 1'b0 :
                          (exe_tlb_op == `TLB_OP_INV ) ? exe_rkd_value[12] :
-                         is_mem_op                    ? exe_alu_result[12] :
+                         tlb_va_valid                 ? exe_alu_result[12] :
                          1'b0;
     assign s1_asid     = (exe_tlb_op == `TLB_OP_SRCH) ? csr_asid_asid :
                          (exe_tlb_op == `TLB_OP_INV ) ? exe_alu_src1[9:0] :
-                         is_mem_op                    ? csr_asid_asid :
+                         tlb_va_valid                 ? csr_asid_asid :
                          10'd0;
     assign tlb_invtlb_op  = exe_invtlb_op;
     assign tlb_invtlb_valid = exe_to_mem_valid & (exe_tlb_op == `TLB_OP_INV);
@@ -380,6 +390,7 @@ module EXEU(
     assign data_tag    = paddr[31:12];
     assign data_offset = paddr[ 3:0];
     assign data_vaddr_bit0 = exe_alu_result[0];  // VA[0] for CACOP way selection (both ICache and DCache)
+    assign data_vaddr_index = exe_alu_result[11:4];
     assign data_wdata  = // st.b
                          (exe_mem_op == 4'd4) ?
                          ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
@@ -400,10 +411,10 @@ module EXEU(
     assign data_uncache = (data_mat == 2'b00);  // SUC (MAT=0): uncached
 
     // CACOP interface to caches
-    assign icache_cacop_valid = exe_cacop_valid & exe_cacop_is_icache & exe_valid & mem_allowin;
+    assign icache_cacop_valid = exe_cacop_valid & exe_cacop_is_icache & exe_valid;
     assign icache_cacop_code  = exe_cacop_code;
     assign icache_cacop_paddr = paddr;  // Use translated PA for Query Index
-    assign dcache_cacop_valid = exe_cacop_valid & exe_cacop_is_dcache & exe_valid & mem_allowin;
+    assign dcache_cacop_valid = exe_cacop_valid & exe_cacop_is_dcache & exe_valid;
     assign dcache_cacop_code  = exe_cacop_code;
     assign dcache_cacop_paddr = paddr;  // Use translated PA for Query Index
 

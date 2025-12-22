@@ -191,6 +191,7 @@ module mycpu_top
     wire [31:0]         data_wdata;             // From my_exeu of EXEU.v
     wire                data_uncache;           // From my_exeu of EXEU.v
     wire                data_vaddr_bit0;        // From my_exeu of EXEU.v
+    wire [7:0]          data_vaddr_index;       // From my_exeu of EXEU.v
     wire                data_addr_ok;           // From dcache of cache.v
     wire                data_data_ok;           // From dcache of cache.v
     wire [31:0]         data_rdata;             // From dcache of cache.v
@@ -271,6 +272,7 @@ module mycpu_top
         // Inputs
         .clk               (clk),
         .resetn            (resetn),
+        .cache_is_icache   (1'b1),
         .valid             (inst_valid),
         .op                (inst_op),
         .index             (inst_index[7:0]),
@@ -279,7 +281,8 @@ module mycpu_top
         .wstrb             (inst_wstrb[3:0]),
         .wdata             (inst_wdata[31:0]),
         .uncache           (inst_uncache),
-        .vaddr_bit0        (data_vaddr_bit0),  // Use CACOP address from EXEU, not IFU PC
+        .cacop_vaddr_index (data_vaddr_index),
+        .cacop_vaddr_bit0  (data_vaddr_bit0),
         .rd_rdy            (icache_rd_rdy),
         .ret_valid         (icache_ret_valid),
         .ret_last          (icache_ret_last),
@@ -310,6 +313,7 @@ module mycpu_top
         // Inputs
         .clk               (clk),
         .resetn            (resetn),
+        .cache_is_icache   (1'b0),
         .valid             (data_valid),
         .op                (data_op),
         .index             (data_index[7:0]),
@@ -318,7 +322,8 @@ module mycpu_top
         .wstrb             (data_wstrb[3:0]),
         .wdata             (data_wdata[31:0]),
         .uncache           (data_uncache),
-        .vaddr_bit0        (data_vaddr_bit0),
+        .cacop_vaddr_index (data_vaddr_index),
+        .cacop_vaddr_bit0  (data_vaddr_bit0),
         .rd_rdy            (dcache_rd_rdy),
         .ret_valid         (dcache_ret_valid),
         .ret_last          (dcache_ret_last),
@@ -474,6 +479,7 @@ module mycpu_top
                  .data_wdata            (data_wdata[31:0]),
                  .data_uncache          (data_uncache),
                  .data_vaddr_bit0       (data_vaddr_bit0),
+                 .data_vaddr_index      (data_vaddr_index[7:0]),
                  .exe_rf_zip            (exe_rf_zip[39:0]),
                  .s1_vppn               (s1_vppn[18:0]),
                  .s1_va_bit12           (s1_va_bit12),

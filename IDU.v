@@ -271,7 +271,7 @@ module IDU(
     wire inst_bgeu = ty_B & op_31_26_d[27];
 
     // ALU operation encoding (extended to 18 bits for multiply/divide)
-    assign alu_op[0]  = inst_add_w | inst_addi_w | ty_M |
+    assign alu_op[0]  = inst_add_w | inst_addi_w | ty_M | inst_cacop |
                         inst_jirl  | inst_bl     | inst_pcaddu12i;
     assign alu_op[1]  = inst_sub_w | inst_bne    | inst_beq;
     assign alu_op[2]  = inst_slt   | inst_slti   | inst_blt    | inst_bge;
@@ -324,7 +324,7 @@ module IDU(
     wire id_ex_int     = has_int & id_valid;     // Interrupt exception
     wire id_ex_syscall = inst_syscall;          // System call exception
     wire id_ex_break   = inst_break;            // Break point exception
-    wire id_ex_ine     = (~inst_known | invtlb_illegal | id_ex_cacop_illegal) & id_valid; // Instruction not exist exception
+    wire id_ex_ine     = (~inst_known | invtlb_illegal | (inst_cacop & id_ex_cacop_illegal)) & id_valid; // Instruction not exist exception
     
     wire csr_tlb       =
          (id_csr_num == `CSR_ASID)    || (id_csr_num == `CSR_CRMD)    ||
@@ -375,7 +375,7 @@ module IDU(
 
     // Immediate type selection
     assign need_ui5  = ty_S;
-    assign need_si12 = (ty_I & ~inst_andi & ~inst_ori & ~inst_xori) | ty_M;
+    assign need_si12 = (ty_I & ~inst_andi & ~inst_ori & ~inst_xori) | ty_M | inst_cacop;
     assign need_ui12 = inst_andi | inst_ori | inst_xori;
     assign need_si16 = ty_B & ~(inst_b | inst_bl);
     assign need_si20 = ty_U;
@@ -397,13 +397,13 @@ module IDU(
     // Control signal generation
     assign src_reg_is_rd = ty_B_COND | ty_M_ST | inst_csrwr | inst_csrxchg;
     assign src1_is_pc = inst_jirl | inst_bl | inst_pcaddu12i;
-    assign src2_is_imm = ty_S | ty_I | ty_M | ty_U | inst_jirl | inst_bl;
+    assign src2_is_imm = ty_S | ty_I | ty_M | ty_U | inst_jirl | inst_bl | inst_cacop;
 
     assign res_from_mem = ty_M_LD;
     assign dst_is_r1 = inst_bl;
     assign dst_is_rj = inst_rdcntid;
     assign gr_we = ~(ty_M_ST | ty_B_COND | inst_b | inst_syscall | inst_break | inst_ertn |
-                     inst_tlbsrch | inst_tlbrd | inst_tlbwr | inst_tlbfill | inst_invtlb)
+                     inst_tlbsrch | inst_tlbrd | inst_tlbwr | inst_tlbfill | inst_invtlb | inst_cacop)
                    & id_valid & ~id_ex_valid;
     assign mem_op = {4{ty_M}} & op_25_22;
     assign dest = dst_is_r1 ? 5'd1 :
@@ -441,7 +441,7 @@ module IDU(
     assign conflict_r2_mem  = (|rf_raddr2) & (rf_raddr2 == mem_rf_waddr) & mem_rf_we;
     assign conflict_r1_exe  = (|rf_raddr1) & (rf_raddr1 == exe_rf_waddr) & exe_rf_we;
     assign conflict_r2_exe  = (|rf_raddr2) & (rf_raddr2 == exe_rf_waddr) & exe_rf_we;
-    assign need_r1          = (~src1_is_pc & (|alu_op)) | inst_invtlb;
+    assign need_r1          = (~src1_is_pc & (|alu_op)) | inst_invtlb | inst_cacop;
     assign need_r2          = (~src2_is_imm & ((|alu_op[11:0]) | ty_MD)) | inst_invtlb;
     assign rj_value  =  conflict_r1_exe ? exe_rf_wdata:
                         conflict_r1_mem ? mem_rf_wdata:

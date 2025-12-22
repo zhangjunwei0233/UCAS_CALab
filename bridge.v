@@ -130,10 +130,38 @@ module bridge
     assign dcache_wr_data_slice[2] = dcache_wr_data[ 95: 64];
     assign dcache_wr_data_slice[3] = dcache_wr_data[127: 96];
 
-    // Arbitration: priority ICache > Data
+    // Arbitration requests
     wire icache_rd_req_valid = icache_rd_req;
     wire data_rd_req_valid   = dcache_rd_req;
     wire data_wr_req_valid   = dcache_wr_req;
+
+    // Round-robin grant selection to avoid starvation
+    reg [1:0] grant_next;
+    always @(*) begin
+        grant_next = last_grant;
+        case (last_grant)
+            2'd0: begin
+                if (data_rd_req_valid)      grant_next = 2'd1;
+                else if (data_wr_req_valid) grant_next = 2'd2;
+                else if (icache_rd_req_valid) grant_next = 2'd0;
+            end
+            2'd1: begin
+                if (data_wr_req_valid)      grant_next = 2'd2;
+                else if (icache_rd_req_valid) grant_next = 2'd0;
+                else if (data_rd_req_valid) grant_next = 2'd1;
+            end
+            2'd2: begin
+                if (icache_rd_req_valid)    grant_next = 2'd0;
+                else if (data_rd_req_valid) grant_next = 2'd1;
+                else if (data_wr_req_valid) grant_next = 2'd2;
+            end
+            default: begin
+                if (icache_rd_req_valid)    grant_next = 2'd0;
+                else if (data_rd_req_valid) grant_next = 2'd1;
+                else if (data_wr_req_valid) grant_next = 2'd2;
+            end
+        endcase
+    end
 
     // Handshake signals
     wire ar_hs, aw_hs, w_hs, b_hs, r_hs;
@@ -165,19 +193,18 @@ module bridge
                     wready_buf <= 2'b00;
                     burst_cnt  <= 3'd0;
                     
-                    // Arbitration with priority: ICache read > Data read > Data write
-                    if (icache_rd_req_valid) begin
-                        grant <= 2'd0;
-                        state <= S_AR;
-                        burst_len <= (icache_rd_type == 3'b100) ? 3'd3 : 3'd0;
-                    end else if (data_rd_req_valid) begin
-                        grant <= 2'd1;
-                        state <= S_AR;
-                        burst_len <= (dcache_rd_type == 3'b100) ? 3'd3 : 3'd0;
-                    end else if (data_wr_req_valid) begin
-                        grant <= 2'd2;
-                        state <= S_AW;
-                        burst_len <= (dcache_wr_type == 3'b100) ? 3'd3 : 3'd0;
+                    if (icache_rd_req_valid || data_rd_req_valid || data_wr_req_valid) begin
+                        grant <= grant_next;
+                        last_grant <= grant_next;
+                        if (grant_next == 2'd2) begin
+                            state <= S_AW;
+                            burst_len <= (dcache_wr_type == 3'b100) ? 3'd3 : 3'd0;
+                        end else begin
+                            state <= S_AR;
+                            burst_len <= (grant_next == 2'd0) ?
+                                         ((icache_rd_type == 3'b100) ? 3'd3 : 3'd0) :
+                                         ((dcache_rd_type == 3'b100) ? 3'd3 : 3'd0);
+                        end
                     end
                 end
 
