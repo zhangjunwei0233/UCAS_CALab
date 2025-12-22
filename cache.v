@@ -33,7 +33,17 @@ module cache(
     output wire [31:0] wr_addr,     // Write request start address
     output wire [ 3:0] wr_wstrb,    // Write operation byte mask
     output wire [127:0] wr_data,    // Write data
-    input  wire        wr_rdy       // Whether write request can be accepted
+    input  wire        wr_rdy,      // Whether write request can be accepted
+
+    // CACOP interface
+    input  wire                      cacop_valid,
+    input  wire [4:0]                cacop_code,
+    output wire                      cacop_rdy,
+    output wire                      cacop_done,
+    // Physical address for Query Index (TLB translated)
+    input  wire [31:0]               cacop_paddr,
+    // Virtual address bit 0 for way selection in direct indexing
+    input  wire                      vaddr_bit0
 );
 
     // CPU-->cache request type (op)
@@ -201,6 +211,20 @@ module cache(
     reg [255:0] dirty_way0;
     reg [255:0] dirty_way1;
 
+    // CACOP control signals
+    wire cacop_op_init     = cacop_valid & (cacop_code[4:3] == 2'b00);  // Store Tag
+    wire cacop_op_idx_inv  = cacop_valid & (cacop_code[4:3] == 2'b01);  // Index Invalidate
+    wire cacop_op_qry      = cacop_valid & (cacop_code[4:3] == 2'b10);  // Query Index
+    wire cacop_op_impl     = cacop_valid & (cacop_code[4:3] == 2'b11);  // Implementation-defined (NOP)
+    wire cacop_needs_op    = cacop_op_init | cacop_op_idx_inv | cacop_op_qry;
+
+    // CACOP request buffer
+    reg        cacop_req_valid;
+    reg [ 7:0] cacop_index;
+    reg [19:0] cacop_tag;
+    reg        cacop_way;           // Way selection for direct indexing (from vaddr[0])
+    reg        cacop_is_query;      // 1: Query Index (needs hit check), 0: Direct Index
+
     // State machines
     reg [4:0] main_state;
     reg [4:0] main_next_state;
@@ -238,6 +262,39 @@ module cache(
         end
     end
 
+    // CACOP request capture
+    always @(posedge clk) begin
+        if (~resetn) begin
+            cacop_req_valid <= 1'b0;
+            cacop_index <= 8'b0;
+            cacop_tag <= 20'b0;
+            cacop_way <= 1'b0;
+            cacop_is_query <= 1'b0;
+        end else if (cacop_valid && !cacop_req_valid && !cacop_op_impl) begin
+            cacop_req_valid <= 1'b1;
+            if (cacop_op_qry) begin
+                // Query Index: use translated PA for tag comparison
+                cacop_index <= cacop_paddr[11:4];
+                cacop_tag <= cacop_paddr[31:12];
+                cacop_way <= 1'b0;             // Not used for query
+                cacop_is_query <= 1'b1;        // Mark as query operation
+            end else begin
+                // Store Tag / Index Invalidate: use DIRECT INDEXING
+                // Specification: operate on way VA[Way-1:0], cache line VA[Index+Offset-1:Offset]
+                // For 2-way cache: Way=1, Index=8, Offset=4
+                // Way select: VA[0], Cache line: VA[11:4]
+                cacop_index <= index;          // VA[11:4] from CPU interface
+                cacop_way <= vaddr_bit0;       // VA[0] selects which way (0 or 1)
+                cacop_tag <= 20'b0;            // Tag not used for direct indexing
+                cacop_is_query <= 1'b0;        // Direct indexing operation
+            end
+        end else if (cacop_req_valid &&
+                     ((main_state == STATE_LOOKUP && !cacop_needs_writeback) ||
+                      (main_state == STATE_IDLE && cacop_needs_writeback))) begin
+            cacop_req_valid <= 1'b0;  // Complete when done
+        end
+    end
+
     // Tag Compare
     wire        way0_v;
     wire        way0_d;
@@ -249,14 +306,20 @@ module cache(
     wire        way1_hit;
     wire        cache_hit;
 
+    // For CACOP, use the request buffer instead of live request
+    wire [19:0] active_tag = cacop_req_valid ? cacop_tag : req_tag;
+    wire [ 7:0] active_index = cacop_req_valid ? cacop_index : req_index;
+
     assign {way0_tag, way0_v} = tagv_way0_rdata;
     assign {way1_tag, way1_v} = tagv_way1_rdata;
-    assign way0_d = dirty_way0[req_index];
-    assign way1_d = dirty_way1[req_index];
+    assign way0_d = dirty_way0[active_index];
+    assign way1_d = dirty_way1[active_index];
 
-    assign way0_hit = way0_v && (way0_tag == req_tag) && !req_uncache;
-    assign way1_hit = way1_v && (way1_tag == req_tag) && !req_uncache;
-    assign cache_hit = (way0_hit || way1_hit) && !req_uncache;
+    assign way0_hit = way0_v && (way0_tag == active_tag) && !req_uncache;
+    assign way1_hit = way1_v && (way1_tag == active_tag) && !req_uncache;
+    wire cacop_hit = way0_hit || way1_hit;
+
+    assign cache_hit = cacop_req_valid ? cacop_hit : (way0_hit || way1_hit) && !req_uncache;
 
     // Data Select
     wire [127:0] way0_load_block;
@@ -311,14 +374,21 @@ module cache(
     always @(*) begin
         case (main_state)
             STATE_IDLE: begin
-                if (valid && !conflict_case1) begin
+                if ((valid && !conflict_case1) || (cacop_needs_op && !cacop_req_valid)) begin
                     main_next_state = STATE_LOOKUP;
                 end else begin
                     main_next_state = STATE_IDLE;
                 end
             end
             STATE_LOOKUP: begin
-                if (!cache_hit || req_uncache) begin
+                if (cacop_req_valid) begin
+                    // CACOP operation path
+                    if (cacop_needs_writeback) begin
+                        main_next_state = STATE_MISS;  // Need writeback first
+                    end else begin
+                        main_next_state = STATE_IDLE;  // Clean line, invalidate immediately
+                    end
+                end else if (!cache_hit || req_uncache) begin
                     main_next_state = STATE_MISS;
                 end else if (!valid || conflict_case1 || conflict_case2) begin
                     main_next_state = STATE_IDLE;
@@ -327,7 +397,14 @@ module cache(
                 end
             end
             STATE_MISS: begin
-                if (req_uncache && req_op && wr_rdy) begin
+                if (cacop_req_valid && cacop_needs_writeback) begin
+                    // CACOP writeback path
+                    if (wr_rdy) begin
+                        main_next_state = STATE_IDLE;  // Writeback accepted, return to invalidate
+                    end else begin
+                        main_next_state = STATE_MISS;  // Wait for writeback ready
+                    end
+                end else if (req_uncache && req_op && wr_rdy) begin
                     main_next_state = STATE_IDLE;
                 end else if (wr_rdy || (req_uncache && !req_op) ||
                              (!req_uncache && !replace_dirty)) begin
@@ -478,16 +555,45 @@ module cache(
                          mixed_word : ret_data;
 
     // TAGV RAM control signals
-    assign tagv_way0_en = lookup_en || ((replace || refill) && (replace_way == 1'b0));
-    assign tagv_way1_en = lookup_en || ((replace || refill) && (replace_way == 1'b1));
-    
-    assign tagv_way0_we = refill && (replace_way == 1'b0) && ret_valid && 
-                          (refill_word_cnt == req_offset[3:2]) && !req_uncache;
-    assign tagv_way1_we = refill && (replace_way == 1'b1) && ret_valid && 
-                          (refill_word_cnt == req_offset[3:2]) && !req_uncache;
-    
-    assign tagv_wdata = {req_tag, 1'b1};
-    assign tagv_addr = lookup_en ? index : req_index;
+    // CACOP operations:
+    // - Direct indexing (Store Tag, Index Invalidate): operate on specific way selected by VA[0]
+    // - Query Index: operate on way that hits (if any)
+
+    // Direct indexing: select way based on cacop_way (VA[0])
+    wire cacop_direct_way0 = cacop_req_valid && !cacop_is_query && (cacop_way == 1'b0);
+    wire cacop_direct_way1 = cacop_req_valid && !cacop_is_query && (cacop_way == 1'b1);
+
+    // Query indexing: select way based on tag hit
+    wire cacop_query_way0 = cacop_req_valid && cacop_is_query && way0_hit;
+    wire cacop_query_way1 = cacop_req_valid && cacop_is_query && way1_hit;
+
+    // Combined: any CACOP operation on this way
+    wire cacop_clear_way0 = cacop_direct_way0 || cacop_query_way0;
+    wire cacop_clear_way1 = cacop_direct_way1 || cacop_query_way1;
+
+    // CACOP writeback detection
+    wire cacop_needs_writeback = cacop_req_valid &&
+                                  (cacop_op_idx_inv || cacop_op_qry) &&
+                                  ((cacop_direct_way0 && way0_d && way0_v) ||
+                                   (cacop_direct_way1 && way1_d && way1_v) ||
+                                   (cacop_query_way0 && way0_d && way0_v) ||
+                                   (cacop_query_way1 && way1_d && way1_v));
+
+    assign tagv_way0_en = lookup_en || ((replace || refill) && (replace_way == 1'b0)) ||
+                          cacop_clear_way0;
+    assign tagv_way1_en = lookup_en || ((replace || refill) && (replace_way == 1'b1)) ||
+                          cacop_clear_way1;
+
+    assign tagv_way0_we = (refill && (replace_way == 1'b0) && ret_valid &&
+                          (refill_word_cnt == req_offset[3:2]) && !req_uncache) ||
+                          cacop_clear_way0;
+    assign tagv_way1_we = (refill && (replace_way == 1'b1) && ret_valid &&
+                          (refill_word_cnt == req_offset[3:2]) && !req_uncache) ||
+                          cacop_clear_way1;
+
+    // CACOP always writes V=0 (clear tag), normal refill writes V=1
+    assign tagv_wdata = cacop_req_valid ? {active_tag, 1'b0} : {req_tag, 1'b1};
+    assign tagv_addr = cacop_req_valid ? active_index : (lookup_en ? index : req_index);
 
     // DATA Bank RAM control signals
     // Way 0 Bank enable
@@ -563,21 +669,33 @@ module cache(
                 end else begin
                     dirty_way1[req_index] <= req_op;
                 end
+            end else if (cacop_clear_way0) begin
+                // CACOP: clear dirty bit when invalidating way 0 (direct or query)
+                dirty_way0[active_index] <= 1'b0;
+            end else if (cacop_clear_way1) begin
+                // CACOP: clear dirty bit when invalidating way 1 (direct or query)
+                dirty_way1[active_index] <= 1'b0;
             end
         end
     end
 
     // Cache --> CPU output signals
     assign addr_ok = (main_state == STATE_IDLE) ||
-                     ((main_state == STATE_LOOKUP) && cache_hit && 
+                     ((main_state == STATE_LOOKUP) && cache_hit &&
                       valid && !conflict_case1 && !conflict_case2);
 
     assign data_ok = ((main_state == STATE_LOOKUP) && (cache_hit || (req_op == OP_WRITE))) ||
-                     ((main_state == STATE_REFILL) && ret_valid && 
+                     ((main_state == STATE_REFILL) && ret_valid &&
                       ((req_uncache && (req_op == OP_READ)) ||  // Uncache: return immediately
                        (!req_uncache && (refill_word_cnt == req_offset[3:2]) && (req_op == OP_READ))));
 
     assign rdata = load_result;
+
+    // CACOP output signals
+    assign cacop_rdy = ~cacop_valid || cacop_op_impl || ~cacop_req_valid;
+    assign cacop_done = cacop_req_valid &&
+                        (main_state == STATE_IDLE ||
+                         (main_state == STATE_LOOKUP && !cacop_needs_writeback));
 
     // Cache --> AXI output signals
     assign rd_req  = (main_state == STATE_REPLACE) && (!req_uncache || !req_op);
@@ -585,12 +703,22 @@ module cache(
     assign rd_addr = req_uncache ? {req_tag, req_index, req_offset} :  // Full address for uncache
                                     {req_tag, req_index, 4'b0};          // Cache line address
 
-    assign wr_req   = (main_state == STATE_MISS) && (replace_dirty || (req_uncache && req_op));
+    assign wr_req   = (main_state == STATE_MISS) &&
+                      (replace_dirty || (req_uncache && req_op) || cacop_needs_writeback);
     assign wr_type  = req_uncache ? WR_TYPE_WORD : WR_TYPE_BLOCK;
-    assign wr_addr  = req_uncache ? {req_tag, req_index, req_offset}:
+
+    // Select which way for CACOP writeback
+    wire cacop_wb_way = (cacop_direct_way1 && way1_d) || (cacop_query_way1 && way1_d);
+
+    assign wr_addr  = cacop_req_valid ?
+                          (cacop_wb_way ? {way1_tag, active_index, 4'b0} :
+                                          {way0_tag, active_index, 4'b0}) :
+                      req_uncache ? {req_tag, req_index, req_offset}:
                       replace_way ? {way1_tag, req_index, 4'b0} :
                                     {way0_tag, req_index, 4'b0};
     assign wr_wstrb = req_uncache ? req_wstrb : 4'b1111;
-    assign wr_data  = req_uncache ? {96'd0, req_wdata} : replace_data;
+    assign wr_data  = cacop_req_valid ?
+                          (cacop_wb_way ? way1_load_block : way0_load_block) :
+                      req_uncache ? {96'd0, req_wdata} : replace_data;
 
 endmodule

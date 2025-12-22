@@ -36,7 +36,7 @@
     `define ESUBCODE_NONE  9'd0
 
     `define IF2ID_LEN (64 + `EX_FIELDS_LEN)    // {inst, pc, ex_fields}
-    `define ID2EXE_LEN (158 + `CNT_INST_FIELDS_LEN +`CSR_FIELDS_LEN + `EX_FIELDS_LEN + `ID_TLB_FIELDS_LEN)  // {..., ex_fields, tlb}
+    `define ID2EXE_LEN (158 + `CNT_INST_FIELDS_LEN +`CSR_FIELDS_LEN + `EX_FIELDS_LEN + `ID_TLB_FIELDS_LEN + 8)  // {..., ex_fields, tlb, cacop}
     `define EXE2MEM_LEN (76 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN + `EXE_TLB_FIELDS_LEN)  // {..., vaddr, ex_fields, tlb}
     `define MEM2WB_LEN (70 + 32 + `CSR_FIELDS_LEN + `EX_FIELDS_LEN + `EXE_TLB_FIELDS_LEN)   // {..., vaddr, ex_fields, tlb}
 

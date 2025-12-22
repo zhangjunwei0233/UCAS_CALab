@@ -25,9 +25,24 @@ module EXEU(
     output wire [ 3:0]               data_wstrb,
     output wire [31:0]               data_wdata,
     output wire                      data_uncache,
+    output wire                      data_vaddr_bit0,  // vaddr[0] for CACOP way selection
     input wire                       data_addr_ok,
     input wire                       data_data_ok,
     input wire [31:0]                data_rdata,
+
+    // CACOP interface to I-Cache
+    output wire                      icache_cacop_valid,
+    output wire [4:0]                icache_cacop_code,
+    input wire                       icache_cacop_rdy,
+    input wire                       icache_cacop_done,
+    output wire [31:0]               icache_cacop_paddr,  // TLB translated PA for Query Index
+
+    // CACOP interface to D-Cache
+    output wire                      dcache_cacop_valid,
+    output wire [4:0]                dcache_cacop_code,
+    input wire                       dcache_cacop_rdy,
+    input wire                       dcache_cacop_done,
+    output wire [31:0]               dcache_cacop_paddr,   // TLB translated PA for Query Index
 
     // Data forwarding to ID stage
     output wire [39:0]               exe_rf_zip, // {exe_res_from_mem, exe_rf_we, exe_rf_waddr, exe_alu_result}
@@ -87,6 +102,11 @@ module EXEU(
     // TLB pipeline fields
     reg  [2:0]  exe_tlb_op;
     reg  [4:0]  exe_invtlb_op;
+    // CACOP pipeline fields
+    reg         exe_cacop_valid;
+    reg  [4:0]  exe_cacop_code;
+    reg         exe_cacop_is_icache;
+    reg         exe_cacop_is_dcache;
     // Exception pipeline fields
     reg         exe_ex_valid;
     reg  [5:0]  exe_ecode;
@@ -145,8 +165,9 @@ module EXEU(
     wire   start_multicycle;
     assign start_multicycle = is_multicycle_op & start_exe & exe_multicycle_ok;  // Special time stamp
     
-    // EXE ready_go: no pending multicycle ops and memory request done
-    assign exe_ready_go = ~start_multicycle & ~multicycle_executing & (~exe_mem_req | exe_mem_req & data_addr_ok);
+    // EXE ready_go: no pending multicycle ops and memory request done and CACOP complete
+    assign exe_ready_go = ~start_multicycle & ~multicycle_executing & (~exe_mem_req | exe_mem_req & data_addr_ok) &
+                          (~exe_cacop_valid | icache_cacop_rdy | dcache_cacop_rdy);
     assign exe_allowin = ~exe_valid | (exe_ready_go & mem_allowin);
     assign exe_to_mem_valid = exe_valid & exe_ready_go;
 
@@ -169,6 +190,7 @@ module EXEU(
              exe_rkd_value, exe_pc,
              exe_rdcntvl, exe_rdcntvh,
              exe_csr_read, exe_csr_we, exe_csr_num, exe_csr_wmask, exe_csr_wvalue,
+             exe_cacop_valid, exe_cacop_code, exe_cacop_is_icache, exe_cacop_is_dcache,
              exe_ex_valid, exe_ecode, exe_esubcode, exe_is_ertn,
              exe_tlb_op, exe_invtlb_op} <= id_to_exe_zip;
             start_exe <= 1'b1;
@@ -357,6 +379,7 @@ module EXEU(
     assign data_index  = paddr[11: 4];
     assign data_tag    = paddr[31:12];
     assign data_offset = paddr[ 3:0];
+    assign data_vaddr_bit0 = exe_alu_result[0];  // VA[0] for CACOP way selection (both ICache and DCache)
     assign data_wdata  = // st.b
                          (exe_mem_op == 4'd4) ?
                          ( addr0 ? {24'd0, exe_rkd_value[7:0]       } :
@@ -375,6 +398,14 @@ module EXEU(
                          // default
                          32'd0;
     assign data_uncache = (data_mat == 2'b00);  // SUC (MAT=0): uncached
+
+    // CACOP interface to caches
+    assign icache_cacop_valid = exe_cacop_valid & exe_cacop_is_icache & exe_valid & mem_allowin;
+    assign icache_cacop_code  = exe_cacop_code;
+    assign icache_cacop_paddr = paddr;  // Use translated PA for Query Index
+    assign dcache_cacop_valid = exe_cacop_valid & exe_cacop_is_dcache & exe_valid & mem_allowin;
+    assign dcache_cacop_code  = exe_cacop_code;
+    assign dcache_cacop_paddr = paddr;  // Use translated PA for Query Index
 
     // CSR value adjustment for TLB search
     // TLBSRCH only updates NE (bit 31) and Index (bit 3:0), PS field is preserved
@@ -411,7 +442,7 @@ module EXEU(
             exe_csr_num_final,
             exe_csr_wmask_final,
             exe_csr_wvalue_final,
-            
+
             exe_ex_valid ? exe_pc : exe_alu_result,  // vaddr for BADV register
 
             exe_to_mem_ex_valid,

@@ -176,6 +176,27 @@ module IDU(
     wire [4:0] id_invtlb_op = inst[4:0];
     wire       invtlb_illegal = inst_invtlb & (inst[4:0] > 5'd6);
 
+    // CACOP instructions (cache operations)
+    // Format: cacop code, rj, si12
+    // Bits 31-22: 0x0000011000, Bits 4-0: code[4:0]
+    wire inst_cacop = (inst[31:22] == 10'b0000011000);
+
+    // CACOP control signals
+    wire [4:0] id_cacop_code = inst[4:0];  // code[4:0]
+    wire id_cacop_is_icache = (id_cacop_code[2:0] == 3'b000);  // code[2:0]=0: I-Cache
+    wire id_cacop_is_dcache = (id_cacop_code[2:0] == 3'b001);  // code[2:0]=1: D-Cache
+    wire id_cacop_op_init   = (id_cacop_code[4:3] == 2'b00);   // Store Tag (initialize)
+    wire id_cacop_op_idxinv = (id_cacop_code[4:3] == 2'b01);   // Index Invalidate
+    wire id_cacop_op_qry    = (id_cacop_code[4:3] == 2'b10);   // Query Index
+    wire id_cacop_op_impl   = (id_cacop_code[4:3] == 2'b11);   // Implementation-defined (NOP)
+
+    // Illegal CACOP codes
+    // wire id_cacop_illegal_icache = inst_cacop & id_cacop_is_icache & id_cacop_op_qry;  // Query Index now supported
+    // wire id_cacop_illegal_dcache = inst_cacop & id_cacop_is_dcache & id_cacop_op_qry;  // Query Index now supported
+    wire id_cacop_illegal_l2     = (id_cacop_code[2:0] == 3'b010);  // L2 Cache not implemented
+    wire id_ex_cacop_illegal = (/*id_cacop_illegal_icache | id_cacop_illegal_dcache |*/
+                               id_cacop_illegal_l2) & id_valid;
+
     // Instruction types:
     // R: Reg-Reg Arithmetic
     //   add.w sub.w slt sltu nor and or xor sll.w srl.w sra.w
@@ -297,13 +318,13 @@ module IDU(
                       inst_pcaddu12i | inst_jirl | inst_b | inst_bl | inst_beq | inst_bne | inst_blt |
                       inst_bge    | inst_bltu   | inst_bgeu   | inst_syscall| inst_break  | inst_ertn   |
                       inst_csrrd  | inst_csrwr  | inst_csrxchg | inst_rdcntid | inst_rdcntvl | inst_rdcntvh |
-                      inst_tlbsrch | inst_tlbrd | inst_tlbwr | inst_tlbfill | inst_invtlb;
+                      inst_tlbsrch | inst_tlbrd | inst_tlbwr | inst_tlbfill | inst_invtlb | inst_cacop;
 
-    // Exception and interrupt generation  
+    // Exception and interrupt generation
     wire id_ex_int     = has_int & id_valid;     // Interrupt exception
     wire id_ex_syscall = inst_syscall;          // System call exception
     wire id_ex_break   = inst_break;            // Break point exception
-    wire id_ex_ine     = (~inst_known | invtlb_illegal) & id_valid; // Instruction not exist exception
+    wire id_ex_ine     = (~inst_known | invtlb_illegal | id_ex_cacop_illegal) & id_valid; // Instruction not exist exception
     
     wire csr_tlb       =
          (id_csr_num == `CSR_ASID)    || (id_csr_num == `CSR_CRMD)    ||
@@ -313,7 +334,8 @@ module IDU(
     wire id_ex_refresh =
          inst_tlbrd || inst_tlbwr || inst_tlbsrch || inst_tlbfill || inst_invtlb ||
          (inst_csrwr   && csr_tlb) ||
-         (inst_csrxchg && csr_tlb);
+         (inst_csrxchg && csr_tlb) ||
+         (inst_cacop && id_cacop_is_icache);  // ICache CACOP requires pipeline flush
     // Mark refresh on the first following instruction
     reg  handshake_done;
     always @(posedge clk) begin
@@ -456,6 +478,11 @@ module IDU(
             id_csr_num,  // 14
             id_csr_wmask,  // 32
             id_csr_wvalue, // 32
+
+            inst_cacop,      // 1
+            id_cacop_code,   // 5
+            id_cacop_is_icache,  // 1
+            id_cacop_is_dcache,  // 1
 
             id_ex_valid,  // 1
             id_ecode,  // 6
