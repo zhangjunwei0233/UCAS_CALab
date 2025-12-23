@@ -719,7 +719,7 @@ module cache(
     end
 
     // Cache --> CPU output signals
-    assign addr_ok = (!cacop_block && (main_state == STATE_IDLE)) ||
+    assign addr_ok = (!cacop_block && (main_state == STATE_IDLE) && !conflict_case1) ||
                      ((main_state == STATE_LOOKUP) && cache_hit &&
                       valid_normal && !conflict_case1 && !conflict_case2);
 
