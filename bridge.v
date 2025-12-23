@@ -283,8 +283,8 @@ module bridge
     // AW channel
     assign awid    = {2'b00, grant};
     assign awaddr  = dcache_wr_addr;
-    assign awlen   = 8'd0;
-    assign awsize  = dcache_arsize;
+    assign awlen   = dcache_awlen;
+    assign awsize  = dcache_awsize;
     assign awburst = 2'b01;
     assign awlock  = 2'b00;
     assign awcache = 4'b0000;
